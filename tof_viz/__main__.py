@@ -36,9 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path", help="入力 CSV / テキストファイル")
     p.add_argument(
         "--mode",
-        choices=["3d", "slice", "grid", "interactive", "browse"],
+        choices=["3d", "slice", "grid", "interactive", "browse", "contact"],
         default="3d",
-        help="表示モード (default: 3d)。browse は .dat のコマ送りプレビュー",
+        help="表示モード (default: 3d)。browse/contact は .dat のコマ探し用",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -71,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="[.dat] 使用する最小距離 mm (default: 500)")
     p.add_argument("--max-depth", type=float, default=None,
                    help="[.dat] 使用する最大距離 mm(壁などを除外。例: 1500)")
+    p.add_argument("--start", type=int, default=0,
+                   help="[.dat contact] 一覧の開始フレーム")
+    p.add_argument("--end", type=int, default=None,
+                   help="[.dat contact] 一覧の終了フレーム")
     return p
 
 
@@ -98,6 +102,13 @@ def main(argv=None) -> int:
             from .browse import browse_frames
             browse_frames(args.path, start_frame=args.frame,
                           min_depth=args.min_depth, max_depth=args.max_depth)
+            return 0
+
+        if args.mode == "contact":
+            from .browse import contact_sheet
+            contact_sheet(args.path, n=args.n, start=args.start, end=args.end,
+                          min_depth=args.min_depth, max_depth=args.max_depth,
+                          save=args.save)
             return 0
 
         frame = args.frame if args.frame is not None else n // 2
