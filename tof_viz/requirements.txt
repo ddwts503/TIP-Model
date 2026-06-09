@@ -1,0 +1,4 @@
+numpy>=1.23
+matplotlib>=3.6
+# 任意: Open3D バックエンドを使う場合のみ
+open3d>=0.17 ; platform_system != "Windows" or python_version < "3.13"

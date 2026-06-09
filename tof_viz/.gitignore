@@ -1,0 +1,5 @@
+# tof_viz outputs
+*.png
+sample_tof.csv
+__pycache__/
+*.pyc
