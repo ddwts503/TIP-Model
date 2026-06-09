@@ -85,6 +85,9 @@ ATR-Promotions 社の計測ソフトが保存する 3D ToF の `.dat`(640×480�
 # まずフレーム数を確認
 python -m tof_viz sensor.dat --list-frames
 
+# コマ送りスライダーで距離ヒートマップを見て、良いフレームを探す
+python -m tof_viz sensor.dat --mode browse --max-depth 1500
+
 # 指定フレームを 3D 表示(壁などの遠い背景は --max-depth で除外)
 python -m tof_viz sensor.dat --frame 3700 --mode 3d --max-depth 1500
 

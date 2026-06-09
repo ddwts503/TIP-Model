@@ -53,6 +53,34 @@ def read_header(path: str, frame_index: int = 0) -> dict:
     }
 
 
+def read_depth_image(
+    path: str,
+    frame_index: int = 0,
+    *,
+    min_depth: float = MIN_DEPTH_DEFAULT,
+    max_depth: Optional[float] = None,
+) -> np.ndarray:
+    """1フレームの距離(Z)を 480x640 の2D配列 [mm] で返す。
+
+    無効画素(範囲外/Z=0)は NaN。コマ送りプレビュー用。
+    """
+    n = count_frames(path)
+    if n == 0:
+        raise ValueError("ToForge形式のフレームが見つかりません。")
+    frame_index = max(0, min(frame_index, n - 1))
+    with open(path, "rb") as f:
+        f.seek(frame_index * FRAME_STRIDE + HEADER_SIZE)
+        buf = f.read(FRAME_DATA_BYTES)
+    raw = np.frombuffer(buf, dtype="<u2").reshape(SENSOR_HEIGHT, SENSOR_WIDTH,
+                                                  NUM_CHANNELS)
+    z = raw[:, :, 2].astype(np.float64) * SCALE
+    mask = z >= float(min_depth)
+    if max_depth is not None:
+        mask &= z <= float(max_depth)
+    z = np.where(mask, z, np.nan)
+    return z
+
+
 def read_frame(
     path: str,
     frame_index: int = 0,

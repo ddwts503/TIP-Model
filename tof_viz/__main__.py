@@ -36,9 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path", help="入力 CSV / テキストファイル")
     p.add_argument(
         "--mode",
-        choices=["3d", "slice", "grid", "interactive"],
+        choices=["3d", "slice", "grid", "interactive", "browse"],
         default="3d",
-        help="表示モード (default: 3d)",
+        help="表示モード (default: 3d)。browse は .dat のコマ送りプレビュー",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -92,6 +92,12 @@ def main(argv=None) -> int:
         if args.list_frames:
             print(f"  --frame で 0〜{n-1} のフレームを選べます。"
                   f"例: --frame {n//2}")
+            return 0
+
+        if args.mode == "browse":
+            from .browse import browse_frames
+            browse_frames(args.path, start_frame=args.frame,
+                          min_depth=args.min_depth, max_depth=args.max_depth)
             return 0
 
         frame = args.frame if args.frame is not None else n // 2
