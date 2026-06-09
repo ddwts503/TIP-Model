@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import argparse
+import glob
+import os
 import sys
 
 from .loader import load_points
@@ -26,6 +28,29 @@ from .visualize import (
 
 def _is_dat(path: str) -> bool:
     return path.lower().endswith(".dat")
+
+
+def resolve_path(path: str) -> str:
+    """フォルダが渡されたら中の .dat を再帰的に探して返す。
+
+    ファイル/フォルダ名の日本語(NFC/NFD)差にも強い。複数あれば最大サイズを採用。
+    """
+    path = path.rstrip("/")
+    if os.path.isdir(path):
+        dats = glob.glob(os.path.join(path, "**", "*.dat"), recursive=True)
+        dats = [d for d in dats if os.path.isfile(d)]
+        if not dats:
+            raise FileNotFoundError(
+                f"フォルダ内に .dat が見つかりません: {path}"
+            )
+        dats.sort(key=lambda d: os.path.getsize(d), reverse=True)
+        chosen = dats[0]
+        if len(dats) > 1:
+            print(f"[info] {len(dats)} 個の .dat が見つかりました。"
+                  f"最大のものを使用します:")
+        print(f"[info] 使用ファイル: {chosen}")
+        return chosen
+    return path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,15 +106,21 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
-    if _is_dat(args.path):
+    try:
+        path = resolve_path(args.path)
+    except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    if _is_dat(path):
         from . import toforge
 
-        n = toforge.count_frames(args.path)
+        n = toforge.count_frames(path)
         if n == 0:
             print("このファイルは ToForge 形式として読めませんでした"
                   "(サイズが合いません)。", file=sys.stderr)
             return 1
-        hdr = toforge.read_header(args.path, 0)
+        hdr = toforge.read_header(path, 0)
         print(f"[ToForge .dat] フレーム数: {n:,}  "
               f"(format {hdr['format_version']}, {toforge.SENSOR_WIDTH}x"
               f"{toforge.SENSOR_HEIGHT})")
@@ -100,20 +131,20 @@ def main(argv=None) -> int:
 
         if args.mode == "browse":
             from .browse import browse_frames
-            browse_frames(args.path, start_frame=args.frame,
+            browse_frames(path, start_frame=args.frame,
                           min_depth=args.min_depth, max_depth=args.max_depth)
             return 0
 
         if args.mode == "contact":
             from .browse import contact_sheet
-            contact_sheet(args.path, n=args.n, start=args.start, end=args.end,
+            contact_sheet(path, n=args.n, start=args.start, end=args.end,
                           min_depth=args.min_depth, max_depth=args.max_depth,
                           save=args.save)
             return 0
 
         frame = args.frame if args.frame is not None else n // 2
         pc = toforge.read_frame(
-            args.path, frame,
+            path, frame,
             min_depth=args.min_depth, max_depth=args.max_depth,
             max_points=args.max_points,
         )
@@ -125,7 +156,7 @@ def main(argv=None) -> int:
             cols = dict(zip(names, idx))
 
         pc = load_points(
-            args.path,
+            path,
             delimiter=args.delimiter,
             max_points=args.max_points,
             **cols,
