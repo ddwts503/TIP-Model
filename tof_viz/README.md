@@ -75,6 +75,35 @@ python -m tof_viz data.csv --mode interactive --axis z
 | `--cols` | `x,y,z[,intensity]` の列番号(0始まり)を明示 |
 | `--save` | 表示せず画像ファイルに保存 |
 
+## ATR-Promotions「TOFORGE」の .dat を読む
+
+ATR-Promotions 社の計測ソフトが保存する 3D ToF の `.dat`(640×480、format 006)に
+対応しています。Windows 専用の TOFORGE ソフトが無くても、Mac/Linux でこの `.dat` を
+直接読んで 3D 表示・輪切りできます。1フレームずつ読むので、数十GBのファイルでも安全です。
+
+```bash
+# まずフレーム数を確認
+python -m tof_viz sensor.dat --list-frames
+
+# 指定フレームを 3D 表示(壁などの遠い背景は --max-depth で除外)
+python -m tof_viz sensor.dat --frame 3700 --mode 3d --max-depth 1500
+
+# 輪切り(Z=距離方向に9枚)
+python -m tof_viz sensor.dat --frame 3700 --mode grid --axis z --n 9 --max-depth 1500
+```
+
+`.dat` 用オプション:
+
+| オプション | 説明 |
+|-----------|------|
+| `--frame N` | 表示するフレーム番号(未指定なら中央) |
+| `--list-frames` | フレーム数などの情報だけ表示 |
+| `--min-depth` | 使用する最小距離 mm(default 500) |
+| `--max-depth` | 使用する最大距離 mm(背景の壁を除外、例 1500) |
+
+座標は mm 単位。変換式(ToForge.dll の仕様より):
+`X=(値-32768)×0.25`, `Y=(値-32768)×0.25`, `Z=値×0.25`, `IR=値`。
+
 ## サンプルデータで試す
 
 実データが無くても、擬似 ToF 点群(円柱+球+床)を生成して試せます。

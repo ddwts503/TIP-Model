@@ -1,10 +1,14 @@
 """コマンドラインインターフェース.
 
-使用例:
+使用例(CSV):
   python -m tof_viz data.csv --mode 3d
   python -m tof_viz data.csv --mode slice --axis z --pos 1.2 --thickness 0.1
   python -m tof_viz data.csv --mode grid --axis z --n 9 --save grid.png
-  python -m tof_viz data.csv --mode interactive --axis z
+
+使用例(ToForge .dat):
+  python -m tof_viz sensor.dat --list-frames
+  python -m tof_viz sensor.dat --frame 500 --mode 3d
+  python -m tof_viz sensor.dat --frame 500 --mode grid --axis z --n 9
 """
 from __future__ import annotations
 
@@ -18,6 +22,10 @@ from .visualize import (
     show_slice,
     show_slices_grid,
 )
+
+
+def _is_dat(path: str) -> bool:
+    return path.lower().endswith(".dat")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,24 +62,57 @@ def build_parser() -> argparse.ArgumentParser:
                    help="x,y,z[,intensity] の列番号をカンマ区切りで指定 (0始まり)")
     p.add_argument("--save", default=None,
                    help="画面表示せず画像ファイルに保存するパス")
+    # --- ToForge .dat 用 ---
+    p.add_argument("--frame", type=int, default=None,
+                   help="[.dat] 表示するフレーム番号(未指定なら中央のフレーム)")
+    p.add_argument("--list-frames", action="store_true",
+                   help="[.dat] フレーム数など情報だけ表示して終了")
+    p.add_argument("--min-depth", type=float, default=500.0,
+                   help="[.dat] 使用する最小距離 mm (default: 500)")
+    p.add_argument("--max-depth", type=float, default=None,
+                   help="[.dat] 使用する最大距離 mm(壁などを除外。例: 1500)")
     return p
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
-    cols = {}
-    if args.cols:
-        idx = [int(c) for c in args.cols.split(",")]
-        names = ["x_col", "y_col", "z_col", "intensity_col"]
-        cols = dict(zip(names, idx))
+    if _is_dat(args.path):
+        from . import toforge
 
-    pc = load_points(
-        args.path,
-        delimiter=args.delimiter,
-        max_points=args.max_points,
-        **cols,
-    )
+        n = toforge.count_frames(args.path)
+        if n == 0:
+            print("このファイルは ToForge 形式として読めませんでした"
+                  "(サイズが合いません)。", file=sys.stderr)
+            return 1
+        hdr = toforge.read_header(args.path, 0)
+        print(f"[ToForge .dat] フレーム数: {n:,}  "
+              f"(format {hdr['format_version']}, {toforge.SENSOR_WIDTH}x"
+              f"{toforge.SENSOR_HEIGHT})")
+        if args.list_frames:
+            print(f"  --frame で 0〜{n-1} のフレームを選べます。"
+                  f"例: --frame {n//2}")
+            return 0
+
+        frame = args.frame if args.frame is not None else n // 2
+        pc = toforge.read_frame(
+            args.path, frame,
+            min_depth=args.min_depth, max_depth=args.max_depth,
+            max_points=args.max_points,
+        )
+    else:
+        cols = {}
+        if args.cols:
+            idx = [int(c) for c in args.cols.split(",")]
+            names = ["x_col", "y_col", "z_col", "intensity_col"]
+            cols = dict(zip(names, idx))
+
+        pc = load_points(
+            args.path,
+            delimiter=args.delimiter,
+            max_points=args.max_points,
+            **cols,
+        )
     print(f"[loaded] {len(pc):,} 点  from {pc.source}")
     print(f"  X: [{pc.x.min():.3g}, {pc.x.max():.3g}]"
           f"  Y: [{pc.y.min():.3g}, {pc.y.max():.3g}]"
