@@ -194,8 +194,10 @@ def show_slices_grid(
     plane = [i for i in range(3) if i != ai]
     names = ["X", "Y", "Z"]
 
-    ncols = math.ceil(math.sqrt(n))
-    nrows = math.ceil(n / ncols)
+    # 先頭に「どこを切っているか」の案内図(locator)を1枚加える
+    total = n + 1
+    ncols = math.ceil(math.sqrt(total))
+    nrows = math.ceil(total / ncols)
     fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows),
                              squeeze=False)
 
@@ -203,15 +205,30 @@ def show_slices_grid(
     xlim = (pc.xyz[:, plane[0]].min(), pc.xyz[:, plane[0]].max())
     ylim = (pc.xyz[:, plane[1]].min(), pc.xyz[:, plane[1]].max())
 
+    # --- 案内図: 横=plane[0], 縦=切る軸, 色=plane[1] ---
+    loc_ax = axes[0][0]
+    loc_ax.scatter(pc.xyz[:, plane[0]], pc.xyz[:, ai],
+                   c=pc.xyz[:, plane[1]], cmap="viridis", s=1)
+    for k, pos in enumerate(positions, start=1):
+        loc_ax.axhline(pos, color="red", lw=0.8)
+        loc_ax.text(xlim[1], pos, f" {k}", color="red", fontsize=8,
+                    va="center", ha="left")
+    loc_ax.set_title("WHERE each slice is cut\n(red line = slice)",
+                     fontsize=9)
+    loc_ax.set_xlabel(names[plane[0]], fontsize=8)
+    loc_ax.set_ylabel(f"{names[ai]} (slice axis)", fontsize=8)
+    loc_ax.set_xlim(xlim)
+
     for k, pos in enumerate(positions):
-        r, c = divmod(k, ncols)
+        cell = k + 1  # 0番は案内図
+        r, c = divmod(cell, ncols)
         ax = axes[r][c]
         mask = slice_points(pc, axis=axis, position=pos, thickness=thickness)
         pts = pc.xyz[mask]
         if len(pts):
             ax.scatter(pts[:, plane[0]], pts[:, plane[1]],
                        c=pts[:, ai], cmap="viridis", s=point_size)
-        ax.set_title(f"{axis.upper()}={pos:.3g} (n={int(mask.sum())})",
+        ax.set_title(f"#{k+1}  {axis.upper()}={pos:.3g} (n={int(mask.sum())})",
                      fontsize=9)
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
@@ -220,11 +237,12 @@ def show_slices_grid(
         ax.set_ylabel(names[plane[1]], fontsize=8)
 
     # 余ったパネルを非表示
-    for k in range(n, nrows * ncols):
+    for k in range(total, nrows * ncols):
         r, c = divmod(k, ncols)
         axes[r][c].axis("off")
 
-    fig.suptitle(f"slices overview  axis={axis.upper()}  ({n} slices)",
+    fig.suptitle(f"slices overview  axis={axis.upper()}  ({n} slices)  "
+                 f"-- top-left = locator",
                  fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
 
