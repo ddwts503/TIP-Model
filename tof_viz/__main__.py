@@ -61,9 +61,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path", help="入力 CSV / テキストファイル")
     p.add_argument(
         "--mode",
-        choices=["3d", "slice", "grid", "interactive", "browse", "contact"],
+        choices=["3d", "slice", "grid", "interactive", "browse", "contact",
+                 "oblique"],
         default="3d",
-        help="表示モード (default: 3d)。browse/contact は .dat のコマ探し用",
+        help="表示モード (default: 3d)。oblique は2点ラインで斜め切り",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -100,7 +101,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="[.dat contact] 一覧の開始フレーム")
     p.add_argument("--end", type=int, default=None,
                    help="[.dat contact] 一覧の終了フレーム")
+    p.add_argument("--p1", default=None,
+                   help="[oblique] 切断ライン端点1 'X,Y'(mm)。未指定ならクリック")
+    p.add_argument("--p2", default=None,
+                   help="[oblique] 切断ライン端点2 'X,Y'(mm)")
     return p
+
+
+def _parse_pt(s):
+    if s is None:
+        return None
+    a, b = s.split(",")
+    return (float(a), float(b))
 
 
 def main(argv=None) -> int:
@@ -189,6 +201,12 @@ def main(argv=None) -> int:
         ps = args.point_size or 4.0
         interactive_slice(pc, axis=args.axis, thickness=args.thickness,
                           point_size=ps)
+    elif args.mode == "oblique":
+        from .oblique import oblique_slice
+        ps = args.point_size or 6.0
+        th = args.thickness if args.thickness is not None else 8.0
+        oblique_slice(pc, p1=_parse_pt(args.p1), p2=_parse_pt(args.p2),
+                      thickness=th, point_size=ps, save=args.save)
     return 0
 
 
