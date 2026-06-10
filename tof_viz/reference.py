@@ -59,16 +59,30 @@ def define_reference(
     print(f"[reference] 基準3点(3D):\n  p1={p1.round(1)}\n  p2={p2.round(1)}"
           f"\n  p3={p3.round(1)}")
 
+    # --- 3点の妥当性チェック(近すぎ/一直線を防ぐ) ---
+    d12 = np.linalg.norm(p2 - p1)
+    d13 = np.linalg.norm(p3 - p1)
+    d23 = np.linalg.norm(p3 - p2)
+    if min(d12, d13, d23) < 15.0:
+        raise ValueError(
+            "3点が近すぎます(離れた3点を選び直してください)。"
+            f" 点間距離= {d12:.0f},{d13:.0f},{d23:.0f} mm")
+    cross = np.cross(p2 - p1, p3 - p1)
+    if np.linalg.norm(cross) < 1e-3 * d12 * d13:
+        raise ValueError("3点がほぼ一直線です。三角形になる3点を選び直してください。")
+
     # --- 解剖学的座標系を構築 ---
     # ez: 3点平面の法線 = 上下軸(superoinferior)。元データの+Yを上向きに合わせる
-    ez = np.cross(p2 - p1, p3 - p1)
-    ez = ez / np.linalg.norm(ez)
+    ez = cross / np.linalg.norm(cross)
     if ez[1] < 0:
         ez = -ez
     # ex: 左右軸(mediolateral)= 耳珠p1→p2 を ez に直交化
     ex = p2 - p1
     ex = ex - (ex @ ez) * ez
-    ex = ex / np.linalg.norm(ex)
+    nx = np.linalg.norm(ex)
+    if nx < 1e-6:
+        raise ValueError("基準軸が作れません。3点を選び直してください。")
+    ex = ex / nx
     # ey: 前後軸(anteroposterior)= ez×ex。顔の前(カメラ側=元-Z)を+に
     ey = np.cross(ez, ex)
     if ey[2] > 0:           # +Z(奥)を向いていたら反転(前を+にする)
