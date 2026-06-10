@@ -62,9 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mode",
         choices=["3d", "slice", "grid", "interactive", "browse", "contact",
-                 "oblique"],
+                 "oblique", "reference"],
         default="3d",
-        help="表示モード (default: 3d)。oblique は2点ラインで斜め切り",
+        help="表示モード。oblique=2点斜め切り, reference=3点で基準面定義",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -105,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="[oblique] 切断ライン端点1 'X,Y'(mm)。未指定ならクリック")
     p.add_argument("--p2", default=None,
                    help="[oblique] 切断ライン端点2 'X,Y'(mm)")
+    p.add_argument("--p3", default=None,
+                   help="[reference] 基準面の3点目 'X,Y'(mm)。p1,p2,p3で平面定義")
+    p.add_argument("--save-csv", default=None,
+                   help="[reference] 基準座標に合わせた点群の保存先CSV")
     return p
 
 
@@ -207,6 +211,12 @@ def main(argv=None) -> int:
         th = args.thickness if args.thickness is not None else 8.0
         oblique_slice(pc, p1=_parse_pt(args.p1), p2=_parse_pt(args.p2),
                       thickness=th, point_size=ps, save=args.save)
+    elif args.mode == "reference":
+        from .reference import define_reference
+        pts = None
+        if args.p1 and args.p2 and args.p3:
+            pts = [_parse_pt(args.p1), _parse_pt(args.p2), _parse_pt(args.p3)]
+        define_reference(pc, pts=pts, save_csv=args.save_csv, save=args.save)
     return 0
 
 
