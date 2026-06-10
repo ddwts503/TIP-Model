@@ -62,10 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mode",
         choices=["3d", "slice", "grid", "interactive", "browse", "contact",
-                 "oblique", "reference", "measure", "front", "bed"],
+                 "oblique", "reference", "measure", "front", "bed", "adjust"],
         default="3d",
-        help="表示モード。bed=ベッド平面を自動検出して基準化, "
-             "reference=3点で基準面, measure=断面計測",
+        help="表示モード。bed=ベッド基準化, adjust=ブラウザで矢状面を対話調整, "
+             "measure=断面計測",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -227,6 +227,9 @@ def main(argv=None) -> int:
         align_to_bed(pc, center=not args.no_center, yaw=args.yaw,
                      dx=args.dx, dy=args.dy,
                      save_csv=args.save_csv, save=args.save)
+    elif args.mode == "adjust":
+        from .adjust_app import run_adjust
+        run_adjust(pc, save_csv=args.save_csv)
     elif args.mode == "front":
         from .reference import save_front_map, save_front_html
         out = args.save or os.path.expanduser("~/Desktop/front_map.png")

@@ -136,6 +136,54 @@ def _center_body(xp, yp, zp):
     return xnew, ynew, {"deg": deg, "cx": cx, "cy": cy}
 
 
+def apply_manual(xp, yp, yaw=0.0, dx=0.0, dy=0.0):
+    """手動微調整: yaw[度]回転 → dx,dy[mm]移動 を (xp,yp) に適用。"""
+    if yaw:
+        th = np.radians(yaw)
+        c, s = np.cos(th), np.sin(th)
+        xp, yp = c * xp - s * yp, s * xp + c * yp
+    if dx or dy:
+        xp = xp - dx
+        yp = yp - dy
+    return xp, yp
+
+
+def compute_bed_aligned(pc: PointCloud, *, dist: float = 6.0,
+                        center: bool = True):
+    """ベッド検出→XY面整列→(任意で)体中心へ矢状面整列。
+
+    戻り値: (xp, yp, zp, inten, meta)。manual 調整は含まない。
+    """
+    inten0 = pc.intensity if pc.intensity is not None else np.zeros(len(pc.xyz))
+    xyz, inten = _clean(pc.xyz, inten0)
+
+    n, d, mask = fit_bed_plane(xyz, dist=dist)
+    if n[2] > 0:
+        n, d = -n, -d
+    height = xyz @ n + d
+
+    zax = n
+    xax = np.array([1.0, 0.0, 0.0]) - (np.array([1.0, 0, 0]) @ zax) * zax
+    if np.linalg.norm(xax) < 1e-6:
+        xax = np.array([0.0, 1.0, 0.0]) - (np.array([0, 1.0, 0]) @ zax) * zax
+    xax = xax / np.linalg.norm(xax)
+    yax = np.cross(zax, xax)
+
+    origin = xyz.mean(0)
+    origin = origin - (origin @ n + d) * n
+    rel = xyz - origin
+    xp = rel @ xax
+    yp = rel @ yax
+    zp = height
+
+    info = None
+    if center:
+        xp, yp, info = _center_body(xp, yp, zp)
+    meta = {"normal": n, "inliers": int(mask.sum()), "center_info": info,
+            "n_in": len(pc.xyz), "n_clean": len(xyz)}
+    return xp, yp, zp, inten, meta
+
+
 def align_to_bed(
     pc: PointCloud,
     *,
@@ -150,63 +198,28 @@ def align_to_bed(
     """ベッド平面を検出し、それを XY 面(Z=高さ)に整列した点群を保存・表示。
 
     center=True で体の対称軸に矢状面(x'=0)を自動整列。さらに yaw[度]/dx/dy[mm]
-    で手動微調整できる(画像を見ながら数字を変えて再実行)。
+    で手動微調整できる。対話調整は --mode adjust(ブラウザ)を参照。
     """
     import matplotlib.pyplot as plt
 
-    inten0 = pc.intensity if pc.intensity is not None else np.zeros(len(pc.xyz))
-    xyz, inten = _clean(pc.xyz, inten0)
-    print(f"[bed] ノイズ除去: {len(pc.xyz):,} → {len(xyz):,} 点")
-
-    n, d, mask = fit_bed_plane(xyz, dist=dist)
-    # 法線をカメラ側(元-Z=手前)に向ける → 被写体の高さが +Z
-    if n[2] > 0:
-        n = -n
-        d = -d
-    # 高さ(ベッドからの符号付き距離)
-    height = xyz @ n + d
-
-    # 平面内の軸: 元X軸を平面に射影して x'、y'=zax×xax
-    zax = n
-    xax = np.array([1.0, 0.0, 0.0]) - (np.array([1.0, 0, 0]) @ zax) * zax
-    if np.linalg.norm(xax) < 1e-6:
-        xax = np.array([0.0, 1.0, 0.0]) - (np.array([0, 1.0, 0]) @ zax) * zax
-    xax = xax / np.linalg.norm(xax)
-    yax = np.cross(zax, xax)
-
-    origin = xyz.mean(0)
-    origin = origin - (origin @ n + d) * n   # 重心をベッド面へ射影
-    rel = xyz - origin
-    xp = rel @ xax
-    yp = rel @ yax
-    zp = height                                # ベッドからの高さ
-
-    # --- 矢状面を体の中心に揃える(体の対称軸でヨー回転+中心移動) ---
-    if center:
-        xp, yp, info = _center_body(xp, yp, zp)
-        if info:
-            print(f"[bed] 自動で体の中心に矢状面(x'=0)を整列。"
-                  f"回転 {info['deg']:.1f}°、中心移動 "
-                  f"({info['cx']:.0f},{info['cy']:.0f})mm")
-    # --- 手動微調整: yaw[度] 回転 → dx,dy[mm] 移動 ---
-    if yaw:
-        th = np.radians(yaw)
-        c, s = np.cos(th), np.sin(th)
-        xr = c * xp - s * yp
-        yr = s * xp + c * yp
-        xp, yp = xr, yr
-    if dx or dy:
-        xp = xp - dx
-        yp = yp - dy
+    xp, yp, zp, inten, meta = compute_bed_aligned(pc, dist=dist, center=center)
+    print(f"[bed] ノイズ除去: {meta['n_in']:,} → {meta['n_clean']:,} 点")
+    if meta["center_info"]:
+        ci = meta["center_info"]
+        print(f"[bed] 自動で体の中心に矢状面(x'=0)を整列。回転 {ci['deg']:.1f}°、"
+              f"中心移動 ({ci['cx']:.0f},{ci['cy']:.0f})mm")
+    xp, yp = apply_manual(xp, yp, yaw, dx, dy)
     if yaw or dx or dy:
         print(f"[bed] 手動調整: 回転 {yaw:+.1f}°, 移動 dx={dx:+.0f} dy={dy:+.0f} mm")
+    mask_n = meta["inliers"]
+    n = meta["normal"]
     aligned = np.column_stack([xp, yp, zp])
 
     if save_csv is None:
         save_csv = os.path.expanduser("~/Desktop/aligned_bed.csv")
     np.savetxt(save_csv, np.column_stack([aligned, inten]), delimiter=",",
                header="x,y,z,intensity", comments="", fmt="%.3f")
-    print(f"[bed] ベッド平面を検出(インライア {int(mask.sum()):,} 点)。"
+    print(f"[bed] ベッド平面を検出(インライア {mask_n:,} 点)。"
           f"法線={n.round(3)}")
     print(f"[bed] 高さの範囲 z' = [{zp.min():.0f}, {zp.max():.0f}] mm")
     print(f"[bed] ベッド=XY面(Z=高さ)に整列した点群を保存: {save_csv}")
