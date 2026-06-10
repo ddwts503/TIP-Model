@@ -55,21 +55,33 @@ def define_reference(
         pts = clicks
 
     landmarks = np.array([_nearest_xyz(pc, (p[0], p[1])) for p in pts])
-    p1, p2, p3 = landmarks
+    p1, p2, p3 = landmarks  # p1=左耳珠, p2=右耳珠, p3=鼻の付け根 を想定
     print(f"[reference] 基準3点(3D):\n  p1={p1.round(1)}\n  p2={p2.round(1)}"
           f"\n  p3={p3.round(1)}")
 
+    # --- 解剖学的座標系を構築 ---
+    # ez: 3点平面の法線 = 上下軸(superoinferior)。元データの+Yを上向きに合わせる
+    ez = np.cross(p2 - p1, p3 - p1)
+    ez = ez / np.linalg.norm(ez)
+    if ez[1] < 0:
+        ez = -ez
+    # ex: 左右軸(mediolateral)= 耳珠p1→p2 を ez に直交化
+    ex = p2 - p1
+    ex = ex - (ex @ ez) * ez
+    ex = ex / np.linalg.norm(ex)
+    # ey: 前後軸(anteroposterior)= ez×ex。顔の前(カメラ側=元-Z)を+に
+    ey = np.cross(ez, ex)
+    if ey[2] > 0:           # +Z(奥)を向いていたら反転(前を+にする)
+        ey = -ey
+        ex = -ex            # 右手系を保つため ex も反転
     origin = landmarks.mean(axis=0)
-    xax = p2 - p1
-    xax = xax / np.linalg.norm(xax)
-    nrm = np.cross(p2 - p1, p3 - p1)
-    nrm = nrm / np.linalg.norm(nrm)
-    if nrm[2] > 0:           # 法線をカメラ向き(奥行きが手前向き)に
-        nrm = -nrm
-    yax = np.cross(nrm, xax)
-    R = np.vstack([xax, yax, nrm])          # 各行が新軸
+    R = np.vstack([ex, ey, ez])             # 行: x'=左右, y'=前後, z'=上下
 
-    aligned = (pc.xyz - origin) @ R.T       # (N,3) 新座標
+    aligned = (pc.xyz - origin) @ R.T       # (N,3) 解剖座標
+    print("[reference] 解剖学的座標系:  x'=左右(矢状面の法線)  "
+          "y'=前後(前頭/背中の面の法線)  z'=上下(横断面の法線)")
+    print("  輪切り: --axis x → 矢状面スライス / --axis y → 前頭(背中)面スライス"
+          " / --axis z → 横断面スライス")
 
     # --- 変換後点群を CSV 保存 ---
     if save_csv is None:
@@ -78,25 +90,34 @@ def define_reference(
     out = np.column_stack([aligned, inten])
     np.savetxt(save_csv, out, delimiter=",", header="x,y,z,intensity",
                comments="", fmt="%.3f")
-    print(f"[reference] 基準座標に合わせた点群を保存: {save_csv}")
-    print(f"  新Z = 基準面からの距離(手前が＋)。"
-          f"これを輪切りすると基準面に平行な層になります。")
+    print(f"[reference] 解剖座標に合わせた点群を保存: {save_csv}")
+    print("  この整列CSVを輪切り: --axis x=矢状面 / --axis y=前頭(背中)面 / "
+          "--axis z=横断面")
 
-    # --- プレビュー: 正面(x'-y')と側面(x'-z') ---
-    fig, (axF, axS) = plt.subplots(1, 2, figsize=(13, 6))
-    axF.scatter(aligned[:, 0], aligned[:, 1], c=aligned[:, 2],
-                cmap="turbo", s=2)
-    axF.axhline(0, color="k", lw=0.6); axF.axvline(0, color="k", lw=0.6)
-    axF.set_aspect("equal", adjustable="box")
-    axF.set_xlabel("x' [mm]"); axF.set_ylabel("y' [mm]")
-    axF.set_title("front (aligned)  color = distance from plane")
-    axS.scatter(aligned[:, 0], aligned[:, 2], c=aligned[:, 2],
-                cmap="viridis", s=2)
-    axS.axhline(0, color="red", lw=1.0)   # 基準面 z'=0
-    axS.set_aspect("equal", adjustable="datalim")
-    axS.set_xlabel("x' [mm]"); axS.set_ylabel("z' = dist from plane [mm]")
-    axS.set_title("side (aligned)  red line = reference plane")
-    fig.suptitle("Reference plane defined by 3 points", fontsize=13)
+    # --- プレビュー: 3つの解剖学的ビュー ---
+    xp, yp, zp = aligned[:, 0], aligned[:, 1], aligned[:, 2]
+    fig, (axC, axSag, axT) = plt.subplots(1, 3, figsize=(16, 5.5))
+    # 正面(coronal view): 左右 x' × 上下 z', 色=前後 y'
+    axC.scatter(xp, zp, c=yp, cmap="turbo", s=2)
+    axC.set_aspect("equal", adjustable="box")
+    axC.set_xlabel("x' left-right [mm]"); axC.set_ylabel("z' up-down [mm]")
+    axC.set_title("FRONT view (coronal)\ncolor = front-back")
+    # 側面(sagittal view): 前後 y' × 上下 z', 色=左右 x'
+    axSag.scatter(yp, zp, c=xp, cmap="coolwarm", s=2)
+    axSag.set_aspect("equal", adjustable="box")
+    axSag.set_xlabel("y' front-back [mm]  (front +)")
+    axSag.set_ylabel("z' up-down [mm]")
+    axSag.set_title("SIDE view (sagittal)\ncolor = left-right")
+    # 上面(transverse view): 左右 x' × 前後 y', 色=上下 z'
+    axT.scatter(xp, yp, c=zp, cmap="viridis", s=2)
+    axT.set_aspect("equal", adjustable="box")
+    axT.set_xlabel("x' left-right [mm]"); axT.set_ylabel("y' front-back [mm]")
+    axT.set_title("TOP view (transverse)\ncolor = up-down")
+    for ax in (axC, axSag, axT):
+        ax.axhline(0, color="k", lw=0.5); ax.axvline(0, color="k", lw=0.5)
+    fig.suptitle("Anatomical reference frame from 3 points  "
+                 "(x'=L-R sagittal, y'=front-back coronal, z'=up-down transverse)",
+                 fontsize=12)
     fig.tight_layout()
 
     if save:
