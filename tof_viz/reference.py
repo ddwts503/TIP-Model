@@ -59,6 +59,38 @@ def save_front_map(pc: PointCloud, save: str, *, grid: float = 50.0):
           "に入れてください(マイナスは = でつなぐ)。")
 
 
+def save_front_html(pc: PointCloud, save: str, *, max_points: int = 50000):
+    """ブラウザで開く対話的な正面図(HTML)。点にマウスを当てると X,Y,Z 表示。
+
+    matplotlib の窓が動かない環境向け。Chrome等で開き、ズーム・ホバーで
+    耳/鼻根の座標を正確に読める。
+    """
+    import plotly.graph_objects as go
+
+    xyz = pc.xyz
+    if len(xyz) > max_points:
+        rng = np.random.default_rng(0)
+        sel = rng.choice(len(xyz), size=max_points, replace=False)
+        xyz = xyz[sel]
+    fig = go.Figure(go.Scattergl(
+        x=xyz[:, 0], y=xyz[:, 1], mode="markers",
+        marker=dict(size=3, color=xyz[:, 2], colorscale="Turbo",
+                    colorbar=dict(title="Z mm"), showscale=True),
+        hovertemplate="X=%{x:.0f} mm<br>Y=%{y:.0f} mm<br>Z=%{marker.color:.0f} mm"
+                      "<extra></extra>",
+    ))
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    fig.update_layout(
+        title="FRONT map (interactive) — hover to read X,Y of "
+              "left ear / right ear / nose root",
+        xaxis_title="X left-right [mm]", yaxis_title="Y up-down [mm]",
+        width=900, height=850,
+    )
+    fig.write_html(save, include_plotlyjs="cdn")
+    print(f"[front-html] ブラウザ用の操作画面を保存: {save}")
+    print("  この .html を開き(ダブルクリック)、点にマウスを当てて X,Y を読んでください。")
+
+
 def _pick_3_points(fx, fy, fz):
     """顔の正面図で3点を1つずつ案内付きクリック。押した所に番号印を表示。"""
     import matplotlib.pyplot as plt

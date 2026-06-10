@@ -215,9 +215,14 @@ def main(argv=None) -> int:
         oblique_slice(pc, p1=_parse_pt(args.p1), p2=_parse_pt(args.p2),
                       thickness=th, point_size=ps, save=args.save)
     elif args.mode == "front":
-        from .reference import save_front_map
+        from .reference import save_front_map, save_front_html
         out = args.save or os.path.expanduser("~/Desktop/front_map.png")
         save_front_map(pc, out)
+        html = os.path.splitext(out)[0] + ".html"
+        try:
+            save_front_html(pc, html)
+        except Exception as e:  # plotly 無い等
+            print(f"[front] HTML 版はスキップ: {e}", file=sys.stderr)
     elif args.mode == "reference":
         from .reference import define_reference
         pts = None
