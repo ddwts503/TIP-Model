@@ -107,6 +107,28 @@ python -m tof_viz sensor.dat --frame 3700 --mode grid --axis z --n 9 --max-depth
 座標は mm 単位。変換式(ToForge.dll の仕様より):
 `X=(値-32768)×0.25`, `Y=(値-32768)×0.25`, `Z=値×0.25`, `IR=値`。
 
+## 基準面の定義と断面の計測(顔の前後比較)
+
+ToForge の `.dat` から、解剖学的な基準座標を作り、断面の長さ・面積を計測して
+前後(時間)で比較できる。
+
+```bash
+# 1) 基準面を3点(左耳珠→右耳珠→鼻根)で定義し、整列点群をCSV保存
+python -m tof_viz sensor.dat --frame 255 --mode reference --min-depth 1 --max-depth 950
+#   → ~/Desktop/aligned_reference.csv（x'=左右/矢状, y'=前後/前頭, z'=上下/横断）
+
+# 2) 断面の長さ・面積を計測(基準原点を通る横断面 z'=0)
+python -m tof_viz ~/Desktop/aligned_before.csv --mode measure --axis z --pos 0 --thickness 5
+
+# 3) 前後比較(before と after の整列CSVを重ねて差分表示)
+python -m tof_viz ~/Desktop/aligned_before.csv --mode measure --axis z --pos 0 \
+    --compare ~/Desktop/aligned_after.csv --save ~/Desktop/compare.png
+```
+
+計測の定義: 長さ = 断面プロファイル曲線の弧長 [mm] / 面積 = その曲線と両端の弦で
+囲まれる面積 [mm²]。PCA で輪郭の長手方向に沿って計測するため傾きに頑健で、前後比較に
+適する。`--axis x/y/z` で矢状面/前頭面/横断面を切り替え、`--pos` で断面位置を指定。
+
 ## サンプルデータで試す
 
 実データが無くても、擬似 ToF 点群(円柱+球+床)を生成して試せます。

@@ -62,9 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mode",
         choices=["3d", "slice", "grid", "interactive", "browse", "contact",
-                 "oblique", "reference"],
+                 "oblique", "reference", "measure"],
         default="3d",
-        help="表示モード。oblique=2点斜め切り, reference=3点で基準面定義",
+        help="表示モード。reference=3点で基準面定義, measure=断面の長さ/面積計測",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -109,6 +109,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="[reference] 基準面の3点目 'X,Y'(mm)。p1,p2,p3で平面定義")
     p.add_argument("--save-csv", default=None,
                    help="[reference] 基準座標に合わせた点群の保存先CSV")
+    p.add_argument("--compare", default=None,
+                   help="[measure] 比較する“後”のデータ(整列CSV等)。前後比較に使用")
     return p
 
 
@@ -217,6 +219,17 @@ def main(argv=None) -> int:
         if args.p1 and args.p2 and args.p3:
             pts = [_parse_pt(args.p1), _parse_pt(args.p2), _parse_pt(args.p3)]
         define_reference(pc, pts=pts, save_csv=args.save_csv, save=args.save)
+    elif args.mode == "measure":
+        from .measure import measure_and_plot
+        pos = args.pos if args.pos is not None else 0.0
+        th = args.thickness if args.thickness is not None else 5.0
+        cmp_pc = None
+        if args.compare:
+            cmp_pc = load_points(resolve_path(args.compare))
+        measure_and_plot(pc, axis=args.axis, position=pos, thickness=th,
+                         label="before" if cmp_pc is not None else "data",
+                         compare_pc=cmp_pc, compare_label="after",
+                         save=args.save)
     return 0
 
 
