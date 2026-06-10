@@ -85,14 +85,48 @@ def _clean(xyz, inten, *, zlo_pct=1.0, zhi_pct=99.0):
     return xyz, inten
 
 
+def _center_body(xp, yp, zp):
+    """体(隆起部)の対称軸を求め、矢状面を x'=0・体長軸を y' に揃える。
+
+    戻り値: (新xp, 新yp, info)。info にヨー角(度)と元の中心。
+    """
+    zmax = float(np.nanmax(zp))
+    subj = zp > 0.3 * zmax            # ベッドより十分高い=体
+    if int(subj.sum()) < 100:
+        return xp, yp, None
+    cx = float(xp[subj].mean())
+    cy = float(yp[subj].mean())
+    XY = np.column_stack([xp[subj] - cx, yp[subj] - cy])
+    # PCA(主成分): e1=最長(体の頭足方向), e2=左右方向
+    _, _, vt = np.linalg.svd(XY, full_matrices=False)
+    e1, e2 = vt[0], vt[1]
+    rel = np.column_stack([xp - cx, yp - cy])
+    xnew = rel @ e2                  # 左右 → x'(矢状面の法線)
+    ynew = rel @ e1                  # 頭足 → y'
+    # 頭(高い側)が +y' になるよう向きを統一
+    top = zp > np.percentile(zp[subj], 90)
+    if top.sum() > 10 and ynew[top].mean() < 0:
+        ynew = -ynew
+    deg = float(np.degrees(np.arctan2(e1[1], e1[0])))
+    return xnew, ynew, {"deg": deg, "cx": cx, "cy": cy}
+
+
 def align_to_bed(
     pc: PointCloud,
     *,
     dist: float = 6.0,
+    center: bool = True,
+    yaw: float = 0.0,
+    dx: float = 0.0,
+    dy: float = 0.0,
     save_csv: Optional[str] = None,
     save: Optional[str] = None,
 ):
-    """ベッド平面を検出し、それを XY 面(Z=高さ)に整列した点群を保存・表示。"""
+    """ベッド平面を検出し、それを XY 面(Z=高さ)に整列した点群を保存・表示。
+
+    center=True で体の対称軸に矢状面(x'=0)を自動整列。さらに yaw[度]/dx/dy[mm]
+    で手動微調整できる(画像を見ながら数字を変えて再実行)。
+    """
     import matplotlib.pyplot as plt
 
     inten0 = pc.intensity if pc.intensity is not None else np.zeros(len(pc.xyz))
@@ -121,6 +155,26 @@ def align_to_bed(
     xp = rel @ xax
     yp = rel @ yax
     zp = height                                # ベッドからの高さ
+
+    # --- 矢状面を体の中心に揃える(体の対称軸でヨー回転+中心移動) ---
+    if center:
+        xp, yp, info = _center_body(xp, yp, zp)
+        if info:
+            print(f"[bed] 自動で体の中心に矢状面(x'=0)を整列。"
+                  f"回転 {info['deg']:.1f}°、中心移動 "
+                  f"({info['cx']:.0f},{info['cy']:.0f})mm")
+    # --- 手動微調整: yaw[度] 回転 → dx,dy[mm] 移動 ---
+    if yaw:
+        th = np.radians(yaw)
+        c, s = np.cos(th), np.sin(th)
+        xr = c * xp - s * yp
+        yr = s * xp + c * yp
+        xp, yp = xr, yr
+    if dx or dy:
+        xp = xp - dx
+        yp = yp - dy
+    if yaw or dx or dy:
+        print(f"[bed] 手動調整: 回転 {yaw:+.1f}°, 移動 dx={dx:+.0f} dy={dy:+.0f} mm")
     aligned = np.column_stack([xp, yp, zp])
 
     if save_csv is None:
@@ -144,9 +198,11 @@ def align_to_bed(
     fig, (axF, axS) = plt.subplots(1, 2, figsize=(13, 6))
     axF.scatter(xp, yp, c=np.clip(zp, *np.percentile(zp, [1, 99])),
                 cmap="turbo", s=2)
+    axF.axvline(0, color="red", lw=1.2)        # 矢状面(体の中心)
     axF.set_aspect("equal", adjustable="box")
     axF.set_xlim(*_lim(xp)); axF.set_ylim(*_lim(yp))
-    axF.set_xlabel("x' [mm]"); axF.set_ylabel("y' [mm]")
+    axF.set_xlabel("x' left-right [mm]  (red = sagittal midline)")
+    axF.set_ylabel("y' head-foot [mm]")
     axF.set_title("TOP view (looking down on bed)\ncolor = height above bed")
     axS.scatter(xp, zp, c=zp, cmap="turbo", s=2)
     axS.axhline(0, color="red", lw=1.2)        # ベッド面

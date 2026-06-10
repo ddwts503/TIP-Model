@@ -112,6 +112,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="[reference] 基準座標に合わせた点群の保存先CSV")
     p.add_argument("--compare", default=None,
                    help="[measure] 比較する“後”のデータ(整列CSV等)。前後比較に使用")
+    p.add_argument("--yaw", type=float, default=0.0,
+                   help="[bed] 手動で水平回転(度)。矢状面の向き微調整")
+    p.add_argument("--dx", type=float, default=0.0,
+                   help="[bed] 手動で左右に移動(mm)。矢状面x'=0の位置調整")
+    p.add_argument("--dy", type=float, default=0.0,
+                   help="[bed] 手動で頭足方向に移動(mm)")
+    p.add_argument("--no-center", action="store_true",
+                   help="[bed] 自動の体中心合わせを無効化(手動のみで合わせる)")
     return p
 
 
@@ -216,7 +224,9 @@ def main(argv=None) -> int:
                       thickness=th, point_size=ps, save=args.save)
     elif args.mode == "bed":
         from .bed import align_to_bed
-        align_to_bed(pc, save_csv=args.save_csv, save=args.save)
+        align_to_bed(pc, center=not args.no_center, yaw=args.yaw,
+                     dx=args.dx, dy=args.dy,
+                     save_csv=args.save_csv, save=args.save)
     elif args.mode == "front":
         from .reference import save_front_map, save_front_html
         out = args.save or os.path.expanduser("~/Desktop/front_map.png")
