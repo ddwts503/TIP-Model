@@ -26,6 +26,49 @@ def _nearest_xyz(pc: PointCloud, xy: Pt) -> np.ndarray:
     return pc.xyz[int(np.argmin(d2))].copy()
 
 
+_LABELS = ["1: LEFT ear / tragus (left edge)",
+           "2: RIGHT ear / tragus (right edge)",
+           "3: nose root (center)"]
+
+
+def _pick_3_points(fx, fy, fz):
+    """顔の正面図で3点を1つずつ案内付きクリック。押した所に番号印を表示。"""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8.5, 8.5))
+    ax.scatter(fx, fy, c=fz, cmap="turbo", s=4)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("X [mm]"); ax.set_ylabel("Y [mm]")
+    ax.set_title("Set reference plane — Click  " + _LABELS[0],
+                 fontsize=11)
+    clicks: list = []
+
+    def onclick(ev):
+        if ev.inaxes is not ax or ev.xdata is None:
+            return
+        clicks.append((float(ev.xdata), float(ev.ydata)))
+        ax.plot(ev.xdata, ev.ydata, "k+", ms=16, mew=2.5)
+        ax.annotate(str(len(clicks)), (ev.xdata, ev.ydata),
+                    color="black", fontsize=14, fontweight="bold",
+                    xytext=(6, 6), textcoords="offset points")
+        if len(clicks) < 3:
+            ax.set_title("Set reference plane — Click  "
+                         + _LABELS[len(clicks)], fontsize=11)
+        else:
+            ax.set_title("3 points set — window closes automatically",
+                         fontsize=11)
+        fig.canvas.draw_idle()
+        if len(clicks) >= 3:
+            plt.close(fig)
+
+    fig.canvas.mpl_connect("button_press_event", onclick)
+    print("[reference] 顔の左の耳→右の耳→鼻の付け根 の順に3点クリックしてください。")
+    plt.show()
+    if len(clicks) < 3:
+        raise ValueError("3点がクリックされませんでした。もう一度お試しください。")
+    return clicks
+
+
 def define_reference(
     pc: PointCloud,
     *,
@@ -41,18 +84,7 @@ def define_reference(
     fx, fy, fz = pc.xyz[order, 0], pc.xyz[order, 1], pc.xyz[order, 2]
 
     if pts is None:
-        figp, axp = plt.subplots(figsize=(7, 7))
-        axp.scatter(fx, fy, c=fz, cmap="turbo", s=2)
-        axp.set_aspect("equal", adjustable="box")
-        axp.set_xlabel("X [mm]"); axp.set_ylabel("Y [mm]")
-        axp.set_title("Click 3 reference points\n"
-                      "(e.g. both tragus + nose root)")
-        print("[reference] 基準面となる3点をクリックしてください...")
-        clicks = figp.ginput(3, timeout=0)
-        plt.close(figp)
-        if len(clicks) < 3:
-            raise ValueError("3点が取得できませんでした。もう一度お試しください。")
-        pts = clicks
+        pts = _pick_3_points(fx, fy, fz)
 
     landmarks = np.array([_nearest_xyz(pc, (p[0], p[1])) for p in pts])
     p1, p2, p3 = landmarks  # p1=左耳珠, p2=右耳珠, p3=鼻の付け根 を想定
