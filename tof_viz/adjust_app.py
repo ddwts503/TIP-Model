@@ -99,6 +99,17 @@ def run_adjust(pc: PointCloud, *, save_csv: Optional[str] = None,
         print("[adjust] " + msg)
         return msg
 
+    # 空いているポートを探す(前のサーバーが残っていても起動できるように)
+    import socket
+
+    def _free_port(start):
+        for p in range(start, start + 20):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(("127.0.0.1", p)) != 0:
+                    return p
+        return start
+    port = _free_port(port)
+
     url = f"http://127.0.0.1:{port}"
     print(f"[adjust] ブラウザで調整画面を開きます: {url}")
     print("[adjust] スライダーで赤線を体の中心に合わせ→「保存」→ "
