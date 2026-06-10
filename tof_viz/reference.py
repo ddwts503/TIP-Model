@@ -47,30 +47,47 @@ _LABELS = ["1: LEFT ear / tragus (left edge)",
            "3: nose root (center)"]
 
 
-def save_front_map(pc: PointCloud, save: str, *, grid: float = 50.0):
-    """顔の正面図(X-Y, 色=奥行き)を座標グリッド付きで画像保存。
+def save_front_map(pc: PointCloud, save: str, *, grid: float = 50.0,
+                   binsize: float = 3.0):
+    """顔の正面図を「塗りつぶしヒートマップ」で座標グリッド付き保存(くっきり)。
 
-    クリックを使わずに、3点(左耳・右耳・鼻根)の X,Y 座標を目で読むための地図。
+    点の散布ではなく X-Y を細かいマスに区切り各マスの奥行きで塗るので、
+    顔の凹凸がはっきり見え、左耳/右耳/鼻根の X,Y を読み取りやすい。
     """
     import matplotlib.pyplot as plt
     import matplotlib.ticker as mticker
 
-    order = np.argsort(-pc.xyz[:, 2])
-    fx, fy, fz = pc.xyz[order, 0], pc.xyz[order, 1], pc.xyz[order, 2]
+    x, y, z = pc.xyz[:, 0], pc.xyz[:, 1], pc.xyz[:, 2]
+    xmin, xmax = x.min(), x.max()
+    ymin, ymax = y.min(), y.max()
+    nx = max(10, int((xmax - xmin) / binsize))
+    ny = max(10, int((ymax - ymin) / binsize))
+    # 各マスの平均奥行き(なめらかな塗り)
+    sumz, xe, ye = np.histogram2d(x, y, bins=[nx, ny],
+                                  range=[[xmin, xmax], [ymin, ymax]],
+                                  weights=z)
+    cnt, _, _ = np.histogram2d(x, y, bins=[nx, ny],
+                               range=[[xmin, xmax], [ymin, ymax]])
+    with np.errstate(invalid="ignore"):
+        grid_z = np.where(cnt > 0, sumz / cnt, np.nan)
+
+    cmap = plt.get_cmap("turbo").copy()
+    cmap.set_bad("black")
     fig, ax = plt.subplots(figsize=(9, 9))
-    sc = ax.scatter(fx, fy, c=fz, cmap="turbo", s=4)
-    fig.colorbar(sc, ax=ax, shrink=0.8, label="depth Z [mm]")
-    ax.set_aspect("equal", adjustable="box")
+    im = ax.imshow(grid_z.T, origin="lower", cmap=cmap,
+                   extent=[xmin, xmax, ymin, ymax], aspect="equal",
+                   interpolation="nearest")
+    fig.colorbar(im, ax=ax, shrink=0.8, label="depth Z [mm]")
     ax.xaxis.set_major_locator(mticker.MultipleLocator(grid))
     ax.yaxis.set_major_locator(mticker.MultipleLocator(grid))
-    ax.grid(True, which="major", color="k", alpha=0.3, lw=0.5)
+    ax.grid(True, which="major", color="w", alpha=0.4, lw=0.5)
     ax.set_xlabel("X (left-right) [mm]")
     ax.set_ylabel("Y (up-down) [mm]")
     ax.set_title("FRONT map — read X,Y of: left ear / right ear / nose root\n"
                  "then run: --mode reference --p1=X,Y --p2=X,Y --p3=X,Y")
     fig.tight_layout()
     fig.savefig(save, dpi=150)
-    print("[front] 座標つき正面図:")
+    print("[front] 座標つき正面図(ヒートマップ):")
     _saved_and_open(save)
     print("  この画像で 左耳/右耳/鼻根 の X,Y を読み、--p1=X,Y --p2=X,Y --p3=X,Y "
           "に入れてください(マイナスは = でつなぐ)。")
