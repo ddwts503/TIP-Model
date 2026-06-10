@@ -26,6 +26,22 @@ def _nearest_xyz(pc: PointCloud, xy: Pt) -> np.ndarray:
     return pc.xyz[int(np.argmin(d2))].copy()
 
 
+def _saved_and_open(path: str) -> None:
+    """保存を報告し、存在確認のうえ macOS では自動で開く。"""
+    import os
+    import subprocess
+    import sys
+
+    exists = os.path.exists(path)
+    ap = os.path.abspath(path)
+    print(f"[saved] {ap}  (exists={exists})")
+    if exists and sys.platform == "darwin":
+        try:
+            subprocess.run(["open", ap], check=False)
+        except Exception:
+            pass
+
+
 _LABELS = ["1: LEFT ear / tragus (left edge)",
            "2: RIGHT ear / tragus (right edge)",
            "3: nose root (center)"]
@@ -54,7 +70,8 @@ def save_front_map(pc: PointCloud, save: str, *, grid: float = 50.0):
                  "then run: --mode reference --p1=X,Y --p2=X,Y --p3=X,Y")
     fig.tight_layout()
     fig.savefig(save, dpi=150)
-    print(f"[front] 座標つき正面図を保存: {save}")
+    print("[front] 座標つき正面図:")
+    _saved_and_open(save)
     print("  この画像で 左耳/右耳/鼻根 の X,Y を読み、--p1=X,Y --p2=X,Y --p3=X,Y "
           "に入れてください(マイナスは = でつなぐ)。")
 
@@ -87,8 +104,8 @@ def save_front_html(pc: PointCloud, save: str, *, max_points: int = 50000):
         width=900, height=850,
     )
     fig.write_html(save, include_plotlyjs="cdn")
-    print(f"[front-html] ブラウザ用の操作画面を保存: {save}")
-    print("  この .html を開き(ダブルクリック)、点にマウスを当てて X,Y を読んでください。")
+    print("[front-html] ブラウザ用の操作画面(ホバーで座標表示):")
+    _saved_and_open(save)
 
 
 def _pick_3_points(fx, fy, fz):
@@ -183,7 +200,13 @@ def define_reference(
     origin = landmarks.mean(axis=0)
     R = np.vstack([ex, ey, ez])             # 行: x'=左右, y'=前後, z'=上下
 
-    aligned = (pc.xyz - origin) @ R.T       # (N,3) 解剖座標
+    with np.errstate(all="ignore"):         # macOS BLAS の空振り警告を抑制
+        aligned = (pc.xyz - origin) @ R.T   # (N,3) 解剖座標
+    inten_all = pc.intensity if pc.intensity is not None else np.zeros(len(aligned))
+    finite = np.isfinite(aligned).all(axis=1)
+    if not finite.all():
+        aligned = aligned[finite]
+        inten_all = inten_all[finite]
     print("[reference] 解剖学的座標系:  x'=左右(矢状面の法線)  "
           "y'=前後(前頭/背中の面の法線)  z'=上下(横断面の法線)")
     print("  輪切り: --axis x → 矢状面スライス / --axis y → 前頭(背中)面スライス"
@@ -192,8 +215,7 @@ def define_reference(
     # --- 変換後点群を CSV 保存 ---
     if save_csv is None:
         save_csv = os.path.expanduser("~/Desktop/aligned_reference.csv")
-    inten = pc.intensity if pc.intensity is not None else np.zeros(len(aligned))
-    out = np.column_stack([aligned, inten])
+    out = np.column_stack([aligned, inten_all])
     np.savetxt(save_csv, out, delimiter=",", header="x,y,z,intensity",
                comments="", fmt="%.3f")
     print(f"[reference] 解剖座標に合わせた点群を保存: {save_csv}")
@@ -228,7 +250,7 @@ def define_reference(
 
     if save:
         fig.savefig(save, dpi=150)
-        print(f"[saved] {save}")
+        _saved_and_open(save)
     else:
         plt.show()
     return save_csv
