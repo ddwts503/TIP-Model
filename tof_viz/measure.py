@@ -136,7 +136,8 @@ def measure_and_plot(
     fig.tight_layout()
     if save:
         fig.savefig(save, dpi=150)
-        print(f"[saved] {save}")
+        from .loader import saved_and_open
+        saved_and_open(save)
     else:
         plt.show()
     return result

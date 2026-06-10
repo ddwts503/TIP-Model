@@ -69,7 +69,8 @@ def show_3d(
 
     if save:
         fig.savefig(save, dpi=150)
-        print(f"[saved] {save}")
+        from .loader import saved_and_open
+        saved_and_open(save)
     else:
         plt.show()
     return fig
@@ -163,7 +164,8 @@ def show_slice(
 
     if save:
         fig.savefig(save, dpi=150)
-        print(f"[saved] {save}")
+        from .loader import saved_and_open
+        saved_and_open(save)
     else:
         plt.show()
     return fig
@@ -248,7 +250,8 @@ def show_slices_grid(
 
     if save:
         fig.savefig(save, dpi=150)
-        print(f"[saved] {save}")
+        from .loader import saved_and_open
+        saved_and_open(save)
     else:
         plt.show()
     return fig

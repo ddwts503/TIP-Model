@@ -7,10 +7,26 @@ from __future__ import annotations
 
 import csv
 import io
+import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
+
+
+def saved_and_open(path: str) -> None:
+    """保存報告 + 存在確認 + macOS なら自動で開く(全モード共通)。"""
+    exists = os.path.exists(path)
+    ap = os.path.abspath(path)
+    print(f"[saved] {ap}  (exists={exists})")
+    if exists and sys.platform == "darwin":
+        try:
+            subprocess.run(["open", ap], check=False)
+        except Exception:
+            pass
+
 
 # ヘッダ行で座標・強度列を探すときの候補名(小文字で比較)
 _X_NAMES = ("x", "px", "x[m]", "x_m", "pos_x")
