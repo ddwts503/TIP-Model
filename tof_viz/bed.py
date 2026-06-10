@@ -85,10 +85,36 @@ def _clean(xyz, inten, *, zlo_pct=1.0, zhi_pct=99.0):
     return xyz, inten
 
 
-def _center_body(xp, yp, zp):
-    """体(隆起部)の対称軸を求め、矢状面を x'=0・体長軸を y' に揃える。
+def _find_sagittal_normal(pts, res=5.0):
+    """体の footprint の左右対称面(矢状面)の法線方向を、鏡映の重なりで探す。
 
-    戻り値: (新xp, 新yp, info)。info にヨー角(度)と元の中心。
+    pts: 中心化済み (M,2)。戻り値: 矢状面の法線(=左右/内外側方向)単位ベクトル。
+    """
+    rng = np.random.default_rng(0)
+    if len(pts) > 6000:
+        pts = pts[rng.choice(len(pts), 6000, replace=False)]
+
+    def occ(P):
+        return set(map(tuple, np.floor(P / res).astype(int)))
+
+    base = occ(pts)
+    best_n = np.array([1.0, 0.0])
+    best_score = -1
+    for deg in range(0, 180, 2):
+        th = np.radians(deg)
+        nrm = np.array([np.cos(th), np.sin(th)])
+        d = pts @ nrm
+        refl = pts - 2.0 * np.outer(d, nrm)   # 矢状面(法線nrm,原点通過)で鏡映
+        score = len(base & occ(refl))         # 元と鏡映の重なり=対称性
+        if score > best_score:
+            best_score, best_n = score, nrm
+    return best_n
+
+
+def _center_body(xp, yp, zp):
+    """体の左右対称面(矢状面)を見つけ、x'=0=体の中心線・頭足方向を y' に揃える。
+
+    戻り値: (新xp, 新yp, info)。
     """
     zmax = float(np.nanmax(zp))
     subj = zp > 0.3 * zmax            # ベッドより十分高い=体
@@ -96,18 +122,17 @@ def _center_body(xp, yp, zp):
         return xp, yp, None
     cx = float(xp[subj].mean())
     cy = float(yp[subj].mean())
-    XY = np.column_stack([xp[subj] - cx, yp[subj] - cy])
-    # PCA(主成分): e1=最長(体の頭足方向), e2=左右方向
-    _, _, vt = np.linalg.svd(XY, full_matrices=False)
-    e1, e2 = vt[0], vt[1]
+    P = np.column_stack([xp[subj] - cx, yp[subj] - cy])
+    nrm = _find_sagittal_normal(P)   # 矢状面の法線=左右(内外側)方向
+    tang = np.array([-nrm[1], nrm[0]])  # 矢状面内の方向=頭足方向
     rel = np.column_stack([xp - cx, yp - cy])
-    xnew = rel @ e2                  # 左右 → x'(矢状面の法線)
-    ynew = rel @ e1                  # 頭足 → y'
+    xnew = rel @ nrm                 # 左右 → x'(矢状面の法線。x'=0が体の中心線)
+    ynew = rel @ tang                # 頭足 → y'
     # 頭(高い側)が +y' になるよう向きを統一
     top = zp > np.percentile(zp[subj], 90)
     if top.sum() > 10 and ynew[top].mean() < 0:
         ynew = -ynew
-    deg = float(np.degrees(np.arctan2(e1[1], e1[0])))
+    deg = float(np.degrees(np.arctan2(tang[1], tang[0])))
     return xnew, ynew, {"deg": deg, "cx": cx, "cy": cy}
 
 
