@@ -126,8 +126,9 @@ def _center_body(xp, yp, zp):
     nrm = _find_sagittal_normal(P)   # 矢状面の法線=左右(内外側)方向
     tang = np.array([-nrm[1], nrm[0]])  # 矢状面内の方向=頭足方向
     rel = np.column_stack([xp - cx, yp - cy])
-    xnew = rel @ nrm                 # 左右 → x'(矢状面の法線。x'=0が体の中心線)
-    ynew = rel @ tang                # 頭足 → y'
+    with np.errstate(all="ignore"):
+        xnew = rel @ nrm                 # 左右 → x'(矢状面の法線。x'=0が体の中心線)
+        ynew = rel @ tang                # 頭足 → y'
     # 頭(高い側)が +y' になるよう向きを統一
     top = zp > np.percentile(zp[subj], 90)
     if top.sum() > 10 and ynew[top].mean() < 0:
@@ -171,9 +172,10 @@ def compute_bed_aligned(pc: PointCloud, *, dist: float = 6.0,
 
     origin = xyz.mean(0)
     origin = origin - (origin @ n + d) * n
-    rel = xyz - origin
-    xp = rel @ xax
-    yp = rel @ yax
+    with np.errstate(all="ignore"):
+        rel = xyz - origin
+        xp = rel @ xax
+        yp = rel @ yax
     zp = height
 
     info = None
