@@ -62,9 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mode",
         choices=["3d", "slice", "grid", "interactive", "browse", "contact",
-                 "oblique", "reference", "measure"],
+                 "oblique", "reference", "measure", "front"],
         default="3d",
-        help="表示モード。reference=3点で基準面定義, measure=断面の長さ/面積計測",
+        help="表示モード。front=座標つき正面図, reference=3点で基準面定義, "
+             "measure=断面の長さ/面積計測",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -213,6 +214,10 @@ def main(argv=None) -> int:
         th = args.thickness if args.thickness is not None else 8.0
         oblique_slice(pc, p1=_parse_pt(args.p1), p2=_parse_pt(args.p2),
                       thickness=th, point_size=ps, save=args.save)
+    elif args.mode == "front":
+        from .reference import save_front_map
+        out = args.save or os.path.expanduser("~/Desktop/front_map.png")
+        save_front_map(pc, out)
     elif args.mode == "reference":
         from .reference import define_reference
         pts = None

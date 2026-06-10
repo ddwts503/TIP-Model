@@ -31,6 +31,34 @@ _LABELS = ["1: LEFT ear / tragus (left edge)",
            "3: nose root (center)"]
 
 
+def save_front_map(pc: PointCloud, save: str, *, grid: float = 50.0):
+    """顔の正面図(X-Y, 色=奥行き)を座標グリッド付きで画像保存。
+
+    クリックを使わずに、3点(左耳・右耳・鼻根)の X,Y 座標を目で読むための地図。
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+
+    order = np.argsort(-pc.xyz[:, 2])
+    fx, fy, fz = pc.xyz[order, 0], pc.xyz[order, 1], pc.xyz[order, 2]
+    fig, ax = plt.subplots(figsize=(9, 9))
+    sc = ax.scatter(fx, fy, c=fz, cmap="turbo", s=4)
+    fig.colorbar(sc, ax=ax, shrink=0.8, label="depth Z [mm]")
+    ax.set_aspect("equal", adjustable="box")
+    ax.xaxis.set_major_locator(mticker.MultipleLocator(grid))
+    ax.yaxis.set_major_locator(mticker.MultipleLocator(grid))
+    ax.grid(True, which="major", color="k", alpha=0.3, lw=0.5)
+    ax.set_xlabel("X (left-right) [mm]")
+    ax.set_ylabel("Y (up-down) [mm]")
+    ax.set_title("FRONT map — read X,Y of: left ear / right ear / nose root\n"
+                 "then run: --mode reference --p1=X,Y --p2=X,Y --p3=X,Y")
+    fig.tight_layout()
+    fig.savefig(save, dpi=150)
+    print(f"[front] 座標つき正面図を保存: {save}")
+    print("  この画像で 左耳/右耳/鼻根 の X,Y を読み、--p1=X,Y --p2=X,Y --p3=X,Y "
+          "に入れてください(マイナスは = でつなぐ)。")
+
+
 def _pick_3_points(fx, fy, fz):
     """顔の正面図で3点を1つずつ案内付きクリック。押した所に番号印を表示。"""
     import matplotlib.pyplot as plt
