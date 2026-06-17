@@ -180,16 +180,17 @@ def run_compare(before_path, after_path, *, frame_before=None,
         baseA = float(np.percentile(az, 10)) if len(az) else 0.0
         volB = volume_face(bx, by, bz, baseB)
         volA = volume_face(ax, ay, az, baseA)
-        hi = min(float(bz.max()), float(az.max())) if len(bz) and len(az) else 1.0
+        # 断面は「鼻先(最も手前=高さ最大)からの深さ h mm」で指定 → 必ず顔の中
+        ref = float(bz.max()) if len(bz) else 1.0
         if h is None:
-            h = 0.6 * float(bz.max()) if len(bz) else 1.0
-        h = min(h, hi)
-        mB = face_metrics(bx, by, bz, height=h)
-        mA = face_metrics(ax, ay, az, height=h)
-        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, hi, h)
+            h = 30.0
+        pos = ref - h
+        mB = face_metrics(bx, by, bz, height=pos)
+        mA = face_metrics(ax, ay, az, height=pos)
+        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, pos)
 
     def make_outputs(state):
-        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, hi, h) = state
+        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, pos) = state
         secf = go.Figure()
         if len(mB["curve"]):
             secf.add_trace(go.Scatter(x=mB["curve"][:, 0], y=mB["curve"][:, 1],
@@ -198,8 +199,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
             secf.add_trace(go.Scatter(x=mA["curve"][:, 0], y=mA["curve"][:, 1],
                            mode="lines+markers", name="after", line_color="red"))
         secf.update_yaxes(scaleanchor="x", scaleratio=1)
-        secf.update_layout(title=f"高さ {h:.0f}mm の断面(青=before 赤=after)",
-                           height=380, xaxis_title="x'[mm]", yaxis_title="y'[mm]")
+        secf.update_layout(
+            title=f"鼻先から {h:.0f}mm 深さの断面(青=before 赤=after)",
+            height=380, xaxis_title="左右 x'[mm]", yaxis_title="前後 y'[mm]")
         wB, lB, dB = face_dims(bx, by, bz)
         wA, lA, dA = face_dims(ax, ay, az)
         rB = dB / wB if wB else 0.0     # 立体度(高さ÷幅)
@@ -301,8 +303,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
         dcc.Slider(40, 250, 5, value=150, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
-        html.Label("計測する高さ z'(mm)"),
-        dcc.Slider(0, 200, 2, value=60, id="h",
+        html.Label("断面の位置=鼻先からの深さ(mm)"),
+        dcc.Slider(0, 150, 2, value=30, id="h",
                    tooltip={"placement": "bottom", "always_visible": True}),
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
