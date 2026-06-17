@@ -62,10 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mode",
         choices=["3d", "slice", "grid", "interactive", "browse", "contact",
-                 "oblique", "reference", "measure", "front", "bed", "adjust"],
+                 "oblique", "reference", "measure", "front", "bed", "adjust",
+                 "compare"],
         default="3d",
-        help="表示モード。bed=ベッド基準化, adjust=ブラウザで矢状面を対話調整, "
-             "measure=断面計測",
+        help="表示モード。compare=ビフォー/アフター小顔チェック(ブラウザ), "
+             "bed=ベッド基準化, adjust=矢状面の対話調整",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
                    help="輪切りの軸 (default: z)")
@@ -120,6 +121,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="[bed] 手動で頭足方向に移動(mm)")
     p.add_argument("--no-center", action="store_true",
                    help="[bed] 自動の体中心合わせを無効化(手動のみで合わせる)")
+    p.add_argument("--after", default=None,
+                   help="[compare] アフターのデータ(.dat か CSV)")
+    p.add_argument("--frame-before", type=int, default=None,
+                   help="[compare] before が .dat のときのフレーム番号")
+    p.add_argument("--frame-after", type=int, default=None,
+                   help="[compare] after が .dat のときのフレーム番号")
     return p
 
 
@@ -138,6 +145,17 @@ def main(argv=None) -> int:
     except FileNotFoundError as e:
         print(str(e), file=sys.stderr)
         return 1
+
+    if args.mode == "compare":
+        if not args.after:
+            print("compare には --after <アフターのファイル> が必要です。",
+                  file=sys.stderr)
+            return 1
+        from .compare_app import run_compare
+        run_compare(path, resolve_path(args.after),
+                    frame_before=args.frame_before or args.frame,
+                    frame_after=args.frame_after)
+        return 0
 
     if _is_dat(path):
         from . import toforge
