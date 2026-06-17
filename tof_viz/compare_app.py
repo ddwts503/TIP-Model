@@ -231,13 +231,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
     bxf, byf, bzf = load_align(before_path, fB0, b_is_dat)
     axf, ayf, azf = load_align(after_path, fA0, a_is_dat)
 
-    def _center0(x, y):
-        """初期円の位置=人物のだいたい中央(あとでドラッグで合わせる)。"""
-        if len(x) == 0:
-            return 0.0, 0.0
-        return float(np.median(x)), float(np.median(y))
-    dbx, dby = _center0(bxf, byf)
-    dax, day = _center0(axf, ayf)
+    # 初期円は画面中央付近(顔はカメラ中央に来やすい)。スライダーで微調整。
+    dbx, dby = 0.0, 0.0
+    dax, day = 0.0, 0.0
     # スライダー範囲は人物の点から(±1500に制限)
     allx = np.concatenate([bxf, axf]) if len(bxf) and len(axf) else np.array([0.0])
     ally = np.concatenate([byf, ayf]) if len(byf) and len(ayf) else np.array([0.0])
