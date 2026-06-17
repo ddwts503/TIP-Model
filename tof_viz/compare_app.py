@@ -57,14 +57,18 @@ def register_icp(src_xyz, tgt_xyz, max_dist=25.0, iters=40):
     return src
 
 
+def _auto_nose(xp, yp, zp):
+    """鼻=一番手前(高さ最大)の位置を自動検出(外れ値に強い中央値)。"""
+    if len(zp) == 0:
+        return (0.0, 0.0)
+    m = zp >= np.percentile(zp, 98)
+    return (float(np.median(xp[m])), float(np.median(yp[m])))
+
+
 def _crop(xp, yp, zp, center, radius):
-    """center=(cx,cy) の周り半径 radius[mm] だけ残す。center None なら重心。"""
-    m = _subject_mask(zp)
+    """center=(cx,cy) の周り半径 radius[mm] だけ残す。center None なら鼻を自動検出。"""
     if center is None:
-        if m.sum() > 10:
-            center = (float(xp[m].mean()), float(yp[m].mean()))
-        else:
-            center = (0.0, 0.0)
+        center = _auto_nose(xp, yp, zp)
     cx, cy = center
     keep = (xp - cx) ** 2 + (yp - cy) ** 2 <= radius ** 2
     return xp[keep], yp[keep], zp[keep], center
@@ -150,16 +154,15 @@ def run_compare(before_path, after_path, *, frame_before=None,
         fig = go.Figure(go.Scattergl(
             x=xp[m], y=yp[m], mode="markers",
             marker=dict(size=3, color=zp[m], colorscale="Turbo")))
-        if center is not None:
-            th = np.linspace(0, 2 * np.pi, 60)
-            fig.add_trace(go.Scatter(
-                x=center[0] + radius * np.cos(th),
-                y=center[1] + radius * np.sin(th),
-                mode="lines", line=dict(color="black", width=2),
-                name="顔の範囲"))
+        cx, cy = center
+        # ドラッグで動かせる円(黒)= 顔の範囲
+        fig.add_shape(type="circle", x0=cx - radius, y0=cy - radius,
+                      x1=cx + radius, y1=cy + radius,
+                      line=dict(color="black", width=3))
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
-        fig.update_layout(title=title, height=360,
-                          showlegend=False, margin=dict(l=20, r=10, t=40, b=20))
+        fig.update_layout(title=title + "(黒い円を顔へドラッグ)", height=380,
+                          showlegend=False, dragmode=False,
+                          margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
     def compute(fB, fA, h, radius, register, cB, cA):
@@ -226,14 +229,13 @@ def run_compare(before_path, after_path, *, frame_before=None,
     bxf, byf, bzf = load_align(before_path, fB0, b_is_dat)
     axf, ayf, azf = load_align(after_path, fA0, a_is_dat)
 
-    def _nose(x, y, h):
-        """鼻=一番手前(高さ最大)の位置を初期中心に。"""
-        if len(h) == 0:
+    def _center0(x, y):
+        """初期円の位置=人物のだいたい中央(あとでドラッグで合わせる)。"""
+        if len(x) == 0:
             return 0.0, 0.0
-        m = h >= np.percentile(h, 98)
-        return float(np.median(x[m])), float(np.median(y[m]))
-    dbx, dby = _nose(bxf, byf, bzf)
-    dax, day = _nose(axf, ayf, azf)
+        return float(np.median(x)), float(np.median(y))
+    dbx, dby = _center0(bxf, byf)
+    dax, day = _center0(axf, ayf)
     # スライダー範囲は人物の点から(±1500に制限)
     allx = np.concatenate([bxf, axf]) if len(bxf) and len(axf) else np.array([0.0])
     ally = np.concatenate([byf, ayf]) if len(byf) and len(ayf) else np.array([0.0])
@@ -260,21 +262,24 @@ def run_compare(before_path, after_path, *, frame_before=None,
                                    id="fa", tooltip={"placement": "bottom",
                                    "always_visible": True})]
 
+    editable = {"editable": True, "edits": {"shapePosition": True},
+                "displayModeBar": False}
+
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v2 カメラ向き]"),
-        html.P("黒い○を顔に合わせます。下の『顔の位置』スライダーを動かして、"
-               "before/after それぞれ○が顔をちょうど囲むように調整してください。"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v3 ドラッグ]"),
+        html.P("黒い円を、マウスでドラッグして顔に重ねてください"
+               "(円の中心が顔の鼻に来るように)。左=before、右=after。"),
         html.Div([
-            dcc.Graph(id="gb", style={"display": "inline-block", "width": "49%"}),
-            dcc.Graph(id="ga", style={"display": "inline-block", "width": "49%"})]),
+            dcc.Graph(id="gb", config=editable,
+                      style={"display": "inline-block", "width": "49%"}),
+            dcc.Graph(id="ga", config=editable,
+                      style={"display": "inline-block", "width": "49%"})]),
+        dcc.Store(id="cb", data=[dbx, dby]),
+        dcc.Store(id="ca", data=[dax, day]),
         html.Div(frame_ctrls),
-        html.B("before 顔の位置(左右 / 上下)"),
-        cslider("bxc", xlo, xhi, dbx), cslider("byc", ylo, yhi, dby),
-        html.B("after 顔の位置(左右 / 上下)"),
-        cslider("axc", xlo, xhi, dax), cslider("ayc", ylo, yhi, day),
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
                       "value": "on"}], value=["on"], style={"fontSize": "16px"}),
-        html.Label("顔の範囲(半径 mm)= ○の大きさ"),
+        html.Label("顔の範囲(半径 mm)= 円の大きさ"),
         dcc.Slider(40, 200, 5, value=100, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("計測する高さ z'(mm)"),
@@ -283,28 +288,49 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
         html.H3(id="ver"),
-        html.P("○を顔に合わせ→範囲/高さを調整→表と判定を確認。終了はControl+C。"),
+        html.P("円を顔へドラッグ→範囲/高さを調整→表と判定を確認。終了はControl+C。"),
     ], style={"fontFamily": "sans-serif", "margin": "20px"})
+
+    def _center_from_relayout(rl, fallback):
+        if not rl:
+            return fallback
+        try:
+            if "shapes[0].x0" in rl:
+                cx = (rl["shapes[0].x0"] + rl["shapes[0].x1"]) / 2
+                cy = (rl["shapes[0].y0"] + rl["shapes[0].y1"]) / 2
+                return [float(cx), float(cy)]
+        except Exception:
+            pass
+        return fallback
+
+    @app.callback(Output("cb", "data"), Input("gb", "relayoutData"),
+                  Input("cb", "data"), prevent_initial_call=True)
+    def _dragb(rl, cur):
+        return _center_from_relayout(rl, cur)
+
+    @app.callback(Output("ca", "data"), Input("ga", "relayoutData"),
+                  Input("ca", "data"), prevent_initial_call=True)
+    def _draga(rl, cur):
+        return _center_from_relayout(rl, cur)
 
     outs = [Output("gb", "figure"), Output("ga", "figure"),
             Output("sec", "figure"), Output("tbl", "children"),
             Output("ver", "children")]
     ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
-           Input("bxc", "value"), Input("byc", "value"),
-           Input("axc", "value"), Input("ayc", "value")]
+           Input("cb", "data"), Input("ca", "data")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, bxc, byc, axc, ayc, *frames):
+    def _update(r, h, reg, cb, ca, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = frames[i] if a_is_dat else fA0
-        cB = (float(bxc), float(byc))
-        cA = (float(axc), float(ayc))
+        cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
+        cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
         st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA)
         bxx, byy, bzz, axx, ayy, azz = (load_align(before_path, int(fB), b_is_dat)
                                         + load_align(after_path, int(fA), a_is_dat))
