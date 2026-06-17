@@ -7,7 +7,9 @@ cd "$HOME/TIP-Model" 2>/dev/null || { echo "TIP-Model フォルダが見つか�
 
 echo "==== 小顔比較アプリ ===="
 echo "[1/3] 道具を最新版に更新中..."
-git pull origin claude/lucid-cerf-3muz44 2>/dev/null
+git fetch origin claude/lucid-cerf-3muz44 2>/dev/null
+git reset --hard origin/claude/lucid-cerf-3muz44 2>/dev/null
+git checkout claude/lucid-cerf-3muz44 2>/dev/null
 
 echo "[2/3] SSDの計測データ(.dat)を探しています..."
 # /Volumes 以下の大きい .dat を新しい順に探す
