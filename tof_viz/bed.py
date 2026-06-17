@@ -20,26 +20,19 @@ def fit_bed_plane(xyz: np.ndarray, *, dist: float = 6.0, iters: int = 2000):
     Open3D があれば使用、無ければ簡易 RANSAC。戻り値: (n(3,), d, inlier_mask)
     平面: n·P + d = 0、|n|=1。
     """
-    try:
-        import open3d as o3d
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(xyz)
-        model, inliers = pcd.segment_plane(distance_threshold=dist,
-                                           ransac_n=3, num_iterations=iters)
-        a, b, c, d = model
-        n = np.array([a, b, c], float)
-        nn = np.linalg.norm(n)
-        mask = np.zeros(len(xyz), bool)
-        mask[np.asarray(inliers)] = True
-        return n / nn, d / nn, mask
-    except Exception:
-        pass
-    # 簡易 RANSAC フォールバック
+def fit_bed_plane(xyz, *, dist: float = 6.0, iters: int = 2000):
+    """点群から支配的な平面(ベッド)を RANSAC で検出(numpyのみ・Open3D不使用)。
+
+    戻り値: (n(3,), d, inlier_mask)。平面: n·P + d = 0、|n|=1。
+    """
     rng = np.random.default_rng(0)
-    best_mask = None
-    best_cnt = -1
-    best = None
     N = len(xyz)
+    # 速度のため評価はサブサンプルで
+    eval_idx = (rng.choice(N, 8000, replace=False) if N > 8000
+                else np.arange(N))
+    sub = xyz[eval_idx]
+    best = None
+    best_cnt = -1
     for _ in range(iters):
         idx = rng.choice(N, 3, replace=False)
         p = xyz[idx]
@@ -49,37 +42,43 @@ def fit_bed_plane(xyz: np.ndarray, *, dist: float = 6.0, iters: int = 2000):
             continue
         n = n / nn
         d = -n @ p[0]
-        dist_all = np.abs(xyz @ n + d)
-        mask = dist_all < dist
-        cnt = int(mask.sum())
+        cnt = int((np.abs(sub @ n + d) < dist).sum())
         if cnt > best_cnt:
-            best_cnt, best_mask, best = cnt, mask, (n, d)
+            best_cnt, best = cnt, (n, d)
     n, d = best
+    mask = np.abs(xyz @ n + d) < dist
     # インライアで最小二乗リフィット
-    P = xyz[best_mask]
+    P = xyz[mask]
     c = P.mean(0)
-    _, _, vt = np.linalg.svd(P - c)
+    _, _, vt = np.linalg.svd(P - c, full_matrices=False)
     n = vt[2]
     d = -n @ c
-    return n, d, best_mask
+    mask = np.abs(xyz @ n + d) < dist
+    return n, d, mask
 
 
 def _clean(xyz, inten, *, zlo_pct=1.0, zhi_pct=99.0):
-    """遠近の外れ値ノイズを除去(Zのパーセンタイル + 統計的外れ値除去)。"""
+    """遠近の外れ値ノイズを除去(Zパーセンタイル + scipyで統計的外れ値除去)。"""
     z = xyz[:, 2]
     lo, hi = np.percentile(z, [zlo_pct, zhi_pct])
     m = (z >= lo) & (z <= hi)
     xyz, inten = xyz[m], inten[m]
-    # Open3D 統計的外れ値除去(あれば)
+    # 統計的外れ値除去(近傍距離が大きい点を除く)。scipyが無ければスキップ
     try:
-        import open3d as o3d
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(xyz)
-        _, keep = pcd.remove_statistical_outlier(nb_neighbors=20,
-                                                 std_ratio=2.0)
-        keep = np.asarray(keep)
-        mask = np.zeros(len(xyz), bool); mask[keep] = True
-        xyz, inten = xyz[mask], inten[mask]
+        from scipy.spatial import cKDTree
+        if len(xyz) > 50:
+            sub = xyz
+            if len(xyz) > 60000:        # 速度のため間引いて基準を作る
+                ridx = np.random.default_rng(0).choice(len(xyz), 60000,
+                                                       replace=False)
+                sub = xyz[ridx]
+            tree = cKDTree(sub)
+            k = min(9, len(sub))
+            dists, _ = tree.query(xyz, k=k, workers=-1)
+            md = dists[:, 1:].mean(axis=1)
+            thr = md.mean() + 2.0 * md.std()
+            keep = md <= thr
+            xyz, inten = xyz[keep], inten[keep]
     except Exception:
         pass
     return xyz, inten

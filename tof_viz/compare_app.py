@@ -37,29 +37,42 @@ def volume_above_bed(xp, yp, zp, *, res=5.0):
     return float(grid.sum() * res * res / 1000.0)
 
 
-def register_icp(src_xyz, tgt_xyz, max_dist=20.0):
-    """after(src)を before(tgt)にピッタリ重ねる剛体位置合わせ(ICP)。
+def register_icp(src_xyz, tgt_xyz, max_dist=25.0, iters=40):
+    """after(src)を before(tgt)に重ねる剛体ICP(numpy/scipyのみ・Open3D不使用)。
 
-    回転+移動のみ(拡大縮小なし)なので、大きさの違い=小顔変化は保たれる。
-    戻り値: 変換後 src 点群。Open3D が無ければそのまま返す。
+    回転+移動のみ(拡大縮小なし)。大きさの違い=小顔変化は保たれる。
     """
     try:
-        import open3d as o3d
+        from scipy.spatial import cKDTree
     except Exception:
         return src_xyz
     if len(src_xyz) < 50 or len(tgt_xyz) < 50:
         return src_xyz
-    s = o3d.geometry.PointCloud()
-    s.points = o3d.utility.Vector3dVector(src_xyz)
-    t = o3d.geometry.PointCloud()
-    t.points = o3d.utility.Vector3dVector(tgt_xyz)
-    res = o3d.pipelines.registration.registration_icp(
-        s, t, max_dist, np.eye(4),
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=60))
-    T = np.asarray(res.transformation)
-    out = (np.column_stack([src_xyz, np.ones(len(src_xyz))]) @ T.T)[:, :3]
-    return out
+    src = src_xyz.astype(float).copy()
+    tgt = tgt_xyz.astype(float)
+    tree = cKDTree(tgt)
+    for _ in range(iters):
+        d, idx = tree.query(src, workers=-1)
+        keep = d < max_dist
+        if int(keep.sum()) < 20:
+            break
+        P = src[keep]
+        Q = tgt[idx[keep]]
+        pc = P.mean(0)
+        qc = Q.mean(0)
+        H = (P - pc).T @ (Q - qc)
+        U, S, Vt = np.linalg.svd(H)
+        R = Vt.T @ U.T
+        if np.linalg.det(R) < 0:          # 反転を防ぐ
+            Vt[-1] *= -1
+            R = Vt.T @ U.T
+        t = qc - R @ pc
+        new = src @ R.T + t
+        if np.abs(new - src).max() < 1e-3:
+            src = new
+            break
+        src = new
+    return src
 
 
 def face_metrics(xp, yp, zp, *, height):
