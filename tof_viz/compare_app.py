@@ -202,11 +202,13 @@ def run_compare(before_path, after_path, *, frame_before=None,
                            height=380, xaxis_title="x'[mm]", yaxis_title="y'[mm]")
         wB, lB, dB = face_dims(bx, by, bz)
         wA, lA, dA = face_dims(ax, ay, az)
+        rB = dB / wB if wB else 0.0     # 立体度(高さ÷幅)
+        rA = dA / wA if wA else 0.0
 
-        def trow(name, b, a, unit, key=False):
+        def trow(name, b, a, unit, key=False, good="down"):
             d = a - b
             pct = (d / b * 100) if b else 0
-            arrow = "⬇小さく" if d < 0 else ("⬆大きく" if d > 0 else "→")
+            arrow = "⬇" if d < 0 else ("⬆" if d > 0 else "→")
             style = {"fontWeight": "bold"} if key else {}
             return html.Tr([html.Td(name, style=style),
                             html.Td(f"{b:.1f}{unit}"), html.Td(f"{a:.1f}{unit}"),
@@ -215,16 +217,25 @@ def run_compare(before_path, after_path, *, frame_before=None,
             html.Thead(html.Tr([html.Th("項目"), html.Th("前"), html.Th("後"),
                                 html.Th("変化")])),
             html.Tbody([
-                trow("◎ 顔幅(左右)", wB, wA, "mm", key=True),
-                trow("◎ 奥行き(突出・高さ)", dB, dA, "mm", key=True),
+                trow("◎ 顔幅(左右)→減れば小顔", wB, wA, "mm", key=True),
+                trow("◎ 高さ(突出)→増えればリフト", dB, dA, "mm", key=True),
+                trow("◎ 立体度(高さ÷幅)→増で引締", rB, rA, "", key=True),
                 trow("顔の長さ(頭足)", lB, lA, "mm"),
-                trow("顔の体積", volB, volA, "cm³"),
+                trow("(参考)体積 ※骨格不変なら減らない", volB, volA, "cm³"),
                 trow("(参考)断面の面積", mB["area"]/100, mA["area"]/100, "cm²")])],
             style={"fontSize": "16px"})
-        score = sum([wA < wB, dA < dB, volA < volB])
-        verdict = ("✅ 小顔になっています(幅・奥行きが減少)" if score >= 2 else
-                   ("❌ 小顔になっていません" if score == 0 else
-                    "△ まちまち(幅は減・奥行きは増 など)"))
+        # 小顔 = 幅が減り、高さ(突出)が増える/立体度が上がる
+        narrower = wA < wB - 0.5
+        taller = dA > dB + 0.5
+        solid_up = rA > rB
+        if narrower and (taller or solid_up):
+            verdict = "✅ 小顔(引き締まり・リフトアップ)= 幅が減り立体的に"
+        elif narrower:
+            verdict = "○ 幅は減少(高さは横ばい)"
+        elif wA > wB + 0.5:
+            verdict = "❌ 顔幅が増えています"
+        else:
+            verdict = "△ ほぼ変化なし"
         return secf, table, verdict
 
     # --- 顔の初期中心(被写体の重心)とスライダー範囲を決める ---
