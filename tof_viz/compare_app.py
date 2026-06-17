@@ -18,7 +18,10 @@ from .measure import measure_section
 
 
 def _subject_mask(zp, frac=0.3):
-    zmax = float(np.nanmax(zp)) if len(zp) else 1.0
+    """ベッドより十分高い点(=体)。外れ値に強いよう 99.5%tile を上限に。"""
+    if len(zp) == 0:
+        return np.zeros(0, bool)
+    zmax = float(np.percentile(zp, 99.5))
     return zp > frac * zmax
 
 
@@ -216,17 +219,23 @@ def run_compare(before_path, after_path, *, frame_before=None,
     bxf, byf, bzf = load_align(before_path, fB0, b_is_dat)
     axf, ayf, azf = load_align(after_path, fA0, a_is_dat)
 
-    def _centroid(xp, yp, zp):
+    def _subj_xy(xp, yp, zp):
         m = _subject_mask(zp)
-        if m.sum() > 10:
-            return float(xp[m].mean()), float(yp[m].mean())
-        return 0.0, 0.0
-    dbx, dby = _centroid(bxf, byf, bzf)
-    dax, day = _centroid(axf, ayf, azf)
-    allx = np.concatenate([bxf, axf])
-    ally = np.concatenate([byf, ayf])
-    xlo, xhi = float(np.percentile(allx, 1)), float(np.percentile(allx, 99))
-    ylo, yhi = float(np.percentile(ally, 1)), float(np.percentile(ally, 99))
+        return (xp[m], yp[m]) if m.sum() > 10 else (xp, yp)
+    bsx, bsy = _subj_xy(bxf, byf, bzf)
+    asx, asy = _subj_xy(axf, ayf, azf)
+
+    def _centroid(sx, sy):
+        return (float(np.median(sx)), float(np.median(sy))) if len(sx) else (0.0, 0.0)
+    dbx, dby = _centroid(bsx, bsy)
+    dax, day = _centroid(asx, asy)
+    # スライダー範囲は「体の点」だけから(ノイズ除外)。さらに常識的な範囲に制限
+    allx = np.concatenate([bsx, asx])
+    ally = np.concatenate([bsy, asy])
+    xlo = max(-1500.0, float(np.percentile(allx, 1)) - 100)
+    xhi = min(1500.0, float(np.percentile(allx, 99)) + 100)
+    ylo = max(-1500.0, float(np.percentile(ally, 1)) - 100)
+    yhi = min(1500.0, float(np.percentile(ally, 99)) + 100)
 
     app = dash.Dash(__name__)
 
