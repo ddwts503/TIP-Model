@@ -153,15 +153,15 @@ def run_compare(before_path, after_path, *, frame_before=None,
         m = _subject_mask(zp)
         fig = go.Figure(go.Scattergl(
             x=xp[m], y=yp[m], mode="markers",
-            marker=dict(size=3, color=zp[m], colorscale="Turbo")))
+            marker=dict(size=3, color=zp[m], colorscale="Turbo", opacity=0.55)))
         cx, cy = center
-        th = np.linspace(0, 2 * np.pi, 80)
-        fig.add_trace(go.Scatter(x=cx + radius * np.cos(th),
-                                 y=cy + radius * np.sin(th), mode="lines",
-                                 line=dict(color="black", width=3)))
+        # 円は shape(レイヤ above)で点群の上に。中心は赤い×マーカー(SVG)で前面に
+        fig.add_shape(type="circle", x0=cx - radius, y0=cy - radius,
+                      x1=cx + radius, y1=cy + radius, layer="above",
+                      line=dict(color="red", width=4))
         fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="markers",
-                                 marker=dict(color="black", size=10,
-                                             symbol="x")))
+                                 marker=dict(color="red", size=16, symbol="x",
+                                             line=dict(color="white", width=1))))
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         fig.update_layout(title=title, height=380, showlegend=False,
                           margin=dict(l=20, r=10, t=40, b=20))
