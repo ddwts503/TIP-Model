@@ -92,11 +92,23 @@ def run_compare(before_path, after_path, *, frame_before=None,
                           margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
-    def build(fB, fA, h):
+    def _crop_face(xp, yp, zp, radius):
+        """鼻の頂点(最大高さ)を中心に半径 radius[mm] の顔の範囲だけ残す。"""
+        if radius <= 0 or len(zp) == 0:
+            return xp, yp, zp
+        i = int(np.argmax(zp))
+        cx, cy = xp[i], yp[i]
+        keep = (xp - cx) ** 2 + (yp - cy) ** 2 <= radius ** 2
+        return xp[keep], yp[keep], zp[keep]
+
+    def build(fB, fA, h, radius=120.0):
         bx, by, bz = load_align(before_path, fB, b_is_dat)
         ax, ay, az = load_align(after_path, fA, a_is_dat)
+        # 顔の範囲だけに絞る
+        bx, by, bz = _crop_face(bx, by, bz, radius)
+        ax, ay, az = _crop_face(ax, ay, az, radius)
         volB, volA = volume_above_bed(bx, by, bz), volume_above_bed(ax, ay, az)
-        hi = min(float(bz.max()), float(az.max()))
+        hi = min(float(bz.max()), float(az.max())) if len(bz) and len(az) else 1
         if h is None:
             h = 0.7 * hi
         h = min(h, hi)
@@ -164,6 +176,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.H2("ビフォー・アフター 小顔チェック"),
         html.Div(top0, id="top"),
         html.Div(controls),
+        html.Label("顔の範囲(鼻の頂点からの半径 mm)= 小さくすると顔だけ"),
+        dcc.Slider(40, 300, 5, value=120, id="r",
+                   tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("計測する高さ z'(ベッドからの高さ mm)"),
         dcc.Slider(0, round(hi0), max(1, round(hi0 / 40)), value=round(0.7*hi0),
                    id="h", tooltip={"placement": "bottom",
@@ -174,7 +189,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.P("コマ/高さスライダーを動かすと再計算。終了はターミナルで Control+C。"),
     ], style={"fontFamily": "sans-serif", "margin": "20px"})
 
-    inputs = [Input("h", "value")]
+    inputs = [Input("h", "value"), Input("r", "value")]
     if b_is_dat:
         inputs.append(Input("fb", "value"))
     if a_is_dat:
@@ -185,11 +200,13 @@ def run_compare(before_path, after_path, *, frame_before=None,
                   *inputs)
     def _upd(*vals):
         h = vals[0]
-        i = 1
+        r = vals[1]
+        i = 2
         fB = vals[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = vals[i] if a_is_dat else fA0
-        top, sec, tbl, ver, _ = build(int(fB), int(fA), float(h))
+        top, sec, tbl, ver, _ = build(int(fB), int(fA), float(h),
+                                      radius=float(r))
         return top, sec, tbl, ver
 
     import socket
