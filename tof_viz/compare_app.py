@@ -67,6 +67,18 @@ def _crop(xp, yp, zp, center, radius):
     return xp[keep], yp[keep], zp[keep], center
 
 
+def face_dims(xp, yp, zp):
+    """切り出した顔の主要寸法を返す(外れ値に強い 2〜98 パーセンタイル幅)。
+
+    width=左右(顔幅), length=頭足(顔の長さ), depth=突出(奥行き=高さ方向)。
+    """
+    def ext(v):
+        if len(v) < 5:
+            return 0.0
+        return float(np.percentile(v, 98) - np.percentile(v, 2))
+    return ext(xp), ext(yp), ext(zp)
+
+
 def face_metrics(xp, yp, zp, *, height):
     pc = PointCloud(xyz=np.column_stack([xp, yp, zp]))
     try:
@@ -176,26 +188,33 @@ def run_compare(before_path, after_path, *, frame_before=None,
         secf.update_layout(title=f"高さ {h:.0f}mm の断面(青=before 赤=after)",
                            height=380, xaxis_title="x'[mm]", yaxis_title="y'[mm]")
 
-        def trow(name, b, a, unit):
+        wB, lB, dB = face_dims(bx, by, bz)
+        wA, lA, dA = face_dims(ax, ay, az)
+
+        def trow(name, b, a, unit, key=False):
             d = a - b
             pct = (d / b * 100) if b else 0
-            arrow = "⬇" if d < 0 else ("⬆" if d > 0 else "→")
-            return html.Tr([html.Td(name), html.Td(f"{b:.1f}{unit}"),
-                            html.Td(f"{a:.1f}{unit}"),
-                            html.Td(f"{d:+.1f} ({pct:+.1f}%){arrow}")])
+            arrow = "⬇小さく" if d < 0 else ("⬆大きく" if d > 0 else "→")
+            style = {"fontWeight": "bold"} if key else {}
+            return html.Tr([html.Td(name, style=style),
+                            html.Td(f"{b:.1f}{unit}"), html.Td(f"{a:.1f}{unit}"),
+                            html.Td(f"{d:+.1f} ({pct:+.1f}%){arrow}",
+                                    style=style)])
         table = html.Table([
             html.Thead(html.Tr([html.Th("項目"), html.Th("前"), html.Th("後"),
                                 html.Th("変化")])),
             html.Tbody([
-                trow("顔の幅(左右)", mB["width"], mA["width"], "mm"),
-                trow("断面の周囲", mB["perimeter"], mA["perimeter"], "mm"),
-                trow("断面の面積", mB["area"]/100, mA["area"]/100, "cm²"),
-                trow("顔の体積", volB, volA, "cm³")])],
+                trow("◎ 顔幅(左右)", wB, wA, "mm", key=True),
+                trow("◎ 奥行き(突出・高さ)", dB, dA, "mm", key=True),
+                trow("顔の長さ(頭足)", lB, lA, "mm"),
+                trow("顔の体積", volB, volA, "cm³"),
+                trow("(参考)断面の面積", mB["area"]/100, mA["area"]/100, "cm²")])],
             style={"fontSize": "16px"})
-        score = sum([mA["width"] < mB["width"], mA["area"] < mB["area"],
-                     volA < volB])
-        verdict = ("✅ 小顔になっています" if score >= 2 else
-                   ("❌ 小顔になっていません" if score == 0 else "△ まちまち"))
+        # 判定は「顔幅」と「奥行き」で(断面積は参考扱い)
+        score = sum([wA < wB, dA < dB, volA < volB])
+        verdict = ("✅ 小顔になっています(幅・奥行きが減少)" if score >= 2 else
+                   ("❌ 小顔になっていません" if score == 0 else
+                    "△ まちまち(幅は減・奥行きは増 など)"))
         return secf, table, verdict
 
     app = dash.Dash(__name__)
