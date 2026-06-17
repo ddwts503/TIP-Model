@@ -127,13 +127,20 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     @lru_cache(maxsize=64)
     def load_align(path, frame, is_dat):
+        """カメラそのままの向き(顔は正立)。人物だけ残し、鼻=手前を高さに。"""
         if is_dat:
             from . import toforge
-            pc = toforge.read_frame(path, frame, min_depth=1.0)
+            pc = toforge.read_frame(path, frame, min_depth=300.0)
         else:
             pc = load_points(path)
-        xp, yp, zp, inten, meta = compute_bed_aligned(pc, center=True)
-        return xp, yp, zp
+        x, y, z = np.asarray(pc.x), np.asarray(pc.y), np.asarray(pc.z)
+        if len(z) == 0:
+            return x, y, z
+        znear = float(np.percentile(z, 1))       # 最も手前(鼻側)
+        keep = (z >= znear) & (z <= znear + 350)  # 人物だけ(背景/ベッド除去)
+        x, y, z = x[keep], y[keep], z[keep]
+        height = float(z.max()) - z               # 手前(鼻)ほど大きい高さ
+        return x, y, height
 
     fB0 = frame_before if frame_before is not None else (nB // 2 if b_is_dat else 0)
     fA0 = frame_after if frame_after is not None else (nA // 2 if a_is_dat else 0)
@@ -219,19 +226,17 @@ def run_compare(before_path, after_path, *, frame_before=None,
     bxf, byf, bzf = load_align(before_path, fB0, b_is_dat)
     axf, ayf, azf = load_align(after_path, fA0, a_is_dat)
 
-    def _subj_xy(xp, yp, zp):
-        m = _subject_mask(zp)
-        return (xp[m], yp[m]) if m.sum() > 10 else (xp, yp)
-    bsx, bsy = _subj_xy(bxf, byf, bzf)
-    asx, asy = _subj_xy(axf, ayf, azf)
-
-    def _centroid(sx, sy):
-        return (float(np.median(sx)), float(np.median(sy))) if len(sx) else (0.0, 0.0)
-    dbx, dby = _centroid(bsx, bsy)
-    dax, day = _centroid(asx, asy)
-    # スライダー範囲は「体の点」だけから(ノイズ除外)。さらに常識的な範囲に制限
-    allx = np.concatenate([bsx, asx])
-    ally = np.concatenate([bsy, asy])
+    def _nose(x, y, h):
+        """鼻=一番手前(高さ最大)の位置を初期中心に。"""
+        if len(h) == 0:
+            return 0.0, 0.0
+        m = h >= np.percentile(h, 98)
+        return float(np.median(x[m])), float(np.median(y[m]))
+    dbx, dby = _nose(bxf, byf, bzf)
+    dax, day = _nose(axf, ayf, azf)
+    # スライダー範囲は人物の点から(±1500に制限)
+    allx = np.concatenate([bxf, axf]) if len(bxf) and len(axf) else np.array([0.0])
+    ally = np.concatenate([byf, ayf]) if len(byf) and len(ayf) else np.array([0.0])
     xlo = max(-1500.0, float(np.percentile(allx, 1)) - 100)
     xhi = min(1500.0, float(np.percentile(allx, 99)) + 100)
     ylo = max(-1500.0, float(np.percentile(ally, 1)) - 100)
@@ -256,7 +261,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
                                    "always_visible": True})]
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v2 カメラ向き]"),
         html.P("黒い○を顔に合わせます。下の『顔の位置』スライダーを動かして、"
                "before/after それぞれ○が顔をちょうど囲むように調整してください。"),
         html.Div([
