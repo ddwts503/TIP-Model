@@ -148,11 +148,12 @@ def main(argv=None) -> int:
 
     if args.mode == "compare":
         if not args.after:
-            print("compare には --after <アフターのファイル> が必要です。",
-                  file=sys.stderr)
+            print("compare には --after <アフターのファイル> が必要です。"
+                  "同じ録画の別コマ同士なら --after same でOK。", file=sys.stderr)
             return 1
+        after_path = path if args.after == "same" else resolve_path(args.after)
         from .compare_app import run_compare
-        run_compare(path, resolve_path(args.after),
+        run_compare(path, after_path,
                     frame_before=args.frame_before or args.frame,
                     frame_after=args.frame_after)
         return 0
