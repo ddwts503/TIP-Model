@@ -231,9 +231,18 @@ def run_compare(before_path, after_path, *, frame_before=None,
     bxf, byf, bzf = load_align(before_path, fB0, b_is_dat)
     axf, ayf, azf = load_align(after_path, fA0, a_is_dat)
 
-    # 初期円は画面中央付近(顔はカメラ中央に来やすい)。スライダーで微調整。
-    dbx, dby = 0.0, 0.0
-    dax, day = 0.0, 0.0
+    def _face0(x, y, h):
+        """初期円=中央寄り(|x|<400)で一番手前(高さ最大)=顔の鼻。腕は除く。"""
+        if len(h) == 0:
+            return 0.0, 0.0
+        c = np.abs(x) < 400
+        if c.sum() < 20:
+            c = np.ones(len(x), bool)
+        xc, yc, hc = x[c], y[c], h[c]
+        m = hc >= np.percentile(hc, 98)
+        return float(np.median(xc[m])), float(np.median(yc[m]))
+    dbx, dby = _face0(bxf, byf, bzf)
+    dax, day = _face0(axf, ayf, azf)
     # スライダー範囲は人物の点から(±1500に制限)
     allx = np.concatenate([bxf, axf]) if len(bxf) and len(axf) else np.array([0.0])
     ally = np.concatenate([byf, ayf]) if len(byf) and len(ayf) else np.array([0.0])
@@ -279,7 +288,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
                       "value": "on"}], value=["on"], style={"fontSize": "16px"}),
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
-        dcc.Slider(40, 200, 5, value=100, id="r",
+        dcc.Slider(40, 250, 5, value=150, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("計測する高さ z'(mm)"),
         dcc.Slider(0, 200, 2, value=60, id="h",
