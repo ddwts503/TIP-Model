@@ -37,6 +37,31 @@ def volume_above_bed(xp, yp, zp, *, res=5.0):
     return float(grid.sum() * res * res / 1000.0)
 
 
+def register_icp(src_xyz, tgt_xyz, max_dist=20.0):
+    """after(src)を before(tgt)にピッタリ重ねる剛体位置合わせ(ICP)。
+
+    回転+移動のみ(拡大縮小なし)なので、大きさの違い=小顔変化は保たれる。
+    戻り値: 変換後 src 点群。Open3D が無ければそのまま返す。
+    """
+    try:
+        import open3d as o3d
+    except Exception:
+        return src_xyz
+    if len(src_xyz) < 50 or len(tgt_xyz) < 50:
+        return src_xyz
+    s = o3d.geometry.PointCloud()
+    s.points = o3d.utility.Vector3dVector(src_xyz)
+    t = o3d.geometry.PointCloud()
+    t.points = o3d.utility.Vector3dVector(tgt_xyz)
+    res = o3d.pipelines.registration.registration_icp(
+        s, t, max_dist, np.eye(4),
+        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=60))
+    T = np.asarray(res.transformation)
+    out = (np.column_stack([src_xyz, np.ones(len(src_xyz))]) @ T.T)[:, :3]
+    return out
+
+
 def face_metrics(xp, yp, zp, *, height):
     pc = PointCloud(xyz=np.column_stack([xp, yp, zp]))
     try:
@@ -101,12 +126,17 @@ def run_compare(before_path, after_path, *, frame_before=None,
         keep = (xp - cx) ** 2 + (yp - cy) ** 2 <= radius ** 2
         return xp[keep], yp[keep], zp[keep]
 
-    def build(fB, fA, h, radius=120.0):
+    def build(fB, fA, h, radius=120.0, register=True):
         bx, by, bz = load_align(before_path, fB, b_is_dat)
         ax, ay, az = load_align(after_path, fA, a_is_dat)
         # 顔の範囲だけに絞る
         bx, by, bz = _crop_face(bx, by, bz, radius)
         ax, ay, az = _crop_face(ax, ay, az, radius)
+        # after を before にピッタリ重ねる(傾き・向き・位置を自動で合わせる)
+        if register and len(bz) and len(az):
+            reg = register_icp(np.column_stack([ax, ay, az]),
+                               np.column_stack([bx, by, bz]))
+            ax, ay, az = reg[:, 0], reg[:, 1], reg[:, 2]
         volB, volA = volume_above_bed(bx, by, bz), volume_above_bed(ax, ay, az)
         hi = min(float(bz.max()), float(az.max())) if len(bz) and len(az) else 1
         if h is None:
@@ -176,6 +206,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.H2("ビフォー・アフター 小顔チェック"),
         html.Div(top0, id="top"),
         html.Div(controls),
+        dcc.Checklist(id="reg",
+                      options=[{"label": " 2つの顔を自動で重ねて比較(傾き・向き・"
+                                "位置を合わせる)", "value": "on"}],
+                      value=["on"], style={"fontSize": "16px"}),
         html.Label("顔の範囲(鼻の頂点からの半径 mm)= 小さくすると顔だけ"),
         dcc.Slider(40, 300, 5, value=120, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
@@ -189,7 +223,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.P("コマ/高さスライダーを動かすと再計算。終了はターミナルで Control+C。"),
     ], style={"fontFamily": "sans-serif", "margin": "20px"})
 
-    inputs = [Input("h", "value"), Input("r", "value")]
+    inputs = [Input("h", "value"), Input("r", "value"), Input("reg", "value")]
     if b_is_dat:
         inputs.append(Input("fb", "value"))
     if a_is_dat:
@@ -199,14 +233,14 @@ def run_compare(before_path, after_path, *, frame_before=None,
                   Output("tbl", "children"), Output("ver", "children"),
                   *inputs)
     def _upd(*vals):
-        h = vals[0]
-        r = vals[1]
-        i = 2
+        h, r, reg = vals[0], vals[1], vals[2]
+        i = 3
         fB = vals[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = vals[i] if a_is_dat else fA0
         top, sec, tbl, ver, _ = build(int(fB), int(fA), float(h),
-                                      radius=float(r))
+                                      radius=float(r),
+                                      register=bool(reg))
         return top, sec, tbl, ver
 
     import socket
