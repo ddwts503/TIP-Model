@@ -148,7 +148,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
                 mode="lines", line=dict(color="black", width=2),
                 name="顔の範囲"))
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
-        fig.update_layout(title=title + "(顔をクリック)", height=360,
+        fig.update_layout(title=title, height=360,
                           showlegend=False, margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
@@ -161,7 +161,6 @@ def run_compare(before_path, after_path, *, frame_before=None,
             reg = register_icp(np.column_stack([ax, ay, az]),
                                np.column_stack([bx, by, bz]))
             ax, ay, az = reg[:, 0], reg[:, 1], reg[:, 2]
-        # 顔の底面(切り出した点群の下から10%)を体積の基準に
         baseB = float(np.percentile(bz, 10)) if len(bz) else 0.0
         baseA = float(np.percentile(az, 10)) if len(az) else 0.0
         volB = volume_face(bx, by, bz, baseB)
@@ -176,7 +175,6 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     def make_outputs(state):
         (bx, by, bz, ax, ay, az, mB, mA, volB, volA, hi, h) = state
-
         secf = go.Figure()
         if len(mB["curve"]):
             secf.add_trace(go.Scatter(x=mB["curve"][:, 0], y=mB["curve"][:, 1],
@@ -187,7 +185,6 @@ def run_compare(before_path, after_path, *, frame_before=None,
         secf.update_yaxes(scaleanchor="x", scaleratio=1)
         secf.update_layout(title=f"高さ {h:.0f}mm の断面(青=before 赤=after)",
                            height=380, xaxis_title="x'[mm]", yaxis_title="y'[mm]")
-
         wB, lB, dB = face_dims(bx, by, bz)
         wA, lA, dA = face_dims(ax, ay, az)
 
@@ -198,8 +195,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
             style = {"fontWeight": "bold"} if key else {}
             return html.Tr([html.Td(name, style=style),
                             html.Td(f"{b:.1f}{unit}"), html.Td(f"{a:.1f}{unit}"),
-                            html.Td(f"{d:+.1f} ({pct:+.1f}%){arrow}",
-                                    style=style)])
+                            html.Td(f"{d:+.1f} ({pct:+.1f}%){arrow}", style=style)])
         table = html.Table([
             html.Thead(html.Tr([html.Th("項目"), html.Th("前"), html.Th("後"),
                                 html.Th("変化")])),
@@ -210,37 +206,61 @@ def run_compare(before_path, after_path, *, frame_before=None,
                 trow("顔の体積", volB, volA, "cm³"),
                 trow("(参考)断面の面積", mB["area"]/100, mA["area"]/100, "cm²")])],
             style={"fontSize": "16px"})
-        # 判定は「顔幅」と「奥行き」で(断面積は参考扱い)
         score = sum([wA < wB, dA < dB, volA < volB])
         verdict = ("✅ 小顔になっています(幅・奥行きが減少)" if score >= 2 else
                    ("❌ 小顔になっていません" if score == 0 else
                     "△ まちまち(幅は減・奥行きは増 など)"))
         return secf, table, verdict
 
+    # --- 顔の初期中心(被写体の重心)とスライダー範囲を決める ---
+    bxf, byf, bzf = load_align(before_path, fB0, b_is_dat)
+    axf, ayf, azf = load_align(after_path, fA0, a_is_dat)
+
+    def _centroid(xp, yp, zp):
+        m = _subject_mask(zp)
+        if m.sum() > 10:
+            return float(xp[m].mean()), float(yp[m].mean())
+        return 0.0, 0.0
+    dbx, dby = _centroid(bxf, byf, bzf)
+    dax, day = _centroid(axf, ayf, azf)
+    allx = np.concatenate([bxf, axf])
+    ally = np.concatenate([byf, ayf])
+    xlo, xhi = float(np.percentile(allx, 1)), float(np.percentile(allx, 99))
+    ylo, yhi = float(np.percentile(ally, 1)), float(np.percentile(ally, 99))
+
     app = dash.Dash(__name__)
 
-    controls = []
+    def cslider(id_, lo, hi, val):
+        return dcc.Slider(round(lo), round(hi), 2, value=round(val), id=id_,
+                          tooltip={"placement": "bottom", "always_visible": True})
+
+    frame_ctrls = []
     if b_is_dat:
-        controls += [html.Label(f"前のコマ (0〜{nB-1})"),
-                     dcc.Slider(0, nB - 1, max(1, nB // 200), value=fB0, id="fb",
-                                tooltip={"placement": "bottom", "always_visible": True})]
+        frame_ctrls += [html.Label(f"前のコマ (0〜{nB-1})"),
+                        dcc.Slider(0, nB - 1, max(1, nB // 200), value=fB0,
+                                   id="fb", tooltip={"placement": "bottom",
+                                   "always_visible": True})]
     if a_is_dat:
-        controls += [html.Label(f"後のコマ (0〜{nA-1})"),
-                     dcc.Slider(0, nA - 1, max(1, nA // 200), value=fA0, id="fa",
-                                tooltip={"placement": "bottom", "always_visible": True})]
+        frame_ctrls += [html.Label(f"後のコマ (0〜{nA-1})"),
+                        dcc.Slider(0, nA - 1, max(1, nA // 200), value=fA0,
+                                   id="fa", tooltip={"placement": "bottom",
+                                   "always_visible": True})]
 
     app.layout = html.Div([
         html.H2("ビフォー・アフター 小顔チェック"),
-        html.P("① 下の before / after の画像で、それぞれ顔の中心(鼻のあたり)を"
-               "クリックしてください。黒い円が顔の範囲です。"),
+        html.P("黒い○を顔に合わせます。下の『顔の位置』スライダーを動かして、"
+               "before/after それぞれ○が顔をちょうど囲むように調整してください。"),
         html.Div([
             dcc.Graph(id="gb", style={"display": "inline-block", "width": "49%"}),
             dcc.Graph(id="ga", style={"display": "inline-block", "width": "49%"})]),
-        dcc.Store(id="cb"), dcc.Store(id="ca"),
-        html.Div(controls),
+        html.Div(frame_ctrls),
+        html.B("before 顔の位置(左右 / 上下)"),
+        cslider("bxc", xlo, xhi, dbx), cslider("byc", ylo, yhi, dby),
+        html.B("after 顔の位置(左右 / 上下)"),
+        cslider("axc", xlo, xhi, dax), cslider("ayc", ylo, yhi, day),
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
                       "value": "on"}], value=["on"], style={"fontSize": "16px"}),
-        html.Label("顔の範囲(半径 mm)"),
+        html.Label("顔の範囲(半径 mm)= ○の大きさ"),
         dcc.Slider(40, 200, 5, value=100, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("計測する高さ z'(mm)"),
@@ -249,50 +269,33 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
         html.H3(id="ver"),
-        html.P("顔をクリック→範囲/高さを調整→表と判定を確認。終了はControl+C。"),
+        html.P("○を顔に合わせ→範囲/高さを調整→表と判定を確認。終了はControl+C。"),
     ], style={"fontFamily": "sans-serif", "margin": "20px"})
-
-    @app.callback(Output("cb", "data"), Input("gb", "clickData"))
-    def _clickb(cd):
-        if cd:
-            p = cd["points"][0]
-            return [p["x"], p["y"]]
-        return None
-
-    @app.callback(Output("ca", "data"), Input("ga", "clickData"))
-    def _clicka(cd):
-        if cd:
-            p = cd["points"][0]
-            return [p["x"], p["y"]]
-        return None
 
     outs = [Output("gb", "figure"), Output("ga", "figure"),
             Output("sec", "figure"), Output("tbl", "children"),
             Output("ver", "children")]
     ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
-           Input("cb", "data"), Input("ca", "data")]
+           Input("bxc", "value"), Input("byc", "value"),
+           Input("axc", "value"), Input("ayc", "value")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, cB, cA, *frames):
+    def _update(r, h, reg, bxc, byc, axc, ayc, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = frames[i] if a_is_dat else fA0
-        cB = tuple(cB) if cB else None
-        cA = tuple(cA) if cA else None
+        cB = (float(bxc), float(byc))
+        cA = (float(axc), float(ayc))
         st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA)
-        bx, by, bz, ax, ay, az = st[:6]
-        # 表示用に元の(切り出し前)も出すため再ロード
-        bxf, byf, bzf = load_align(before_path, int(fB), b_is_dat)
-        axf, ayf, azf = load_align(after_path, int(fA), a_is_dat)
-        _, _, _, ccB = _crop(bxf, byf, bzf, cB, float(r))
-        _, _, _, ccA = _crop(axf, ayf, azf, cA, float(r))
-        gb = topfig(bxf, byf, bzf, f"before (frame {fB})", ccB, float(r))
-        ga = topfig(axf, ayf, azf, f"after (frame {fA})", ccA, float(r))
+        bxx, byy, bzz, axx, ayy, azz = (load_align(before_path, int(fB), b_is_dat)
+                                        + load_align(after_path, int(fA), a_is_dat))
+        gb = topfig(bxx, byy, bzz, f"before (frame {fB})", cB, float(r))
+        ga = topfig(axx, ayy, azz, f"after (frame {fA})", cA, float(r))
         secf, table, verdict = make_outputs(st)
         return gb, ga, secf, table, verdict
 
