@@ -58,11 +58,15 @@ def register_icp(src_xyz, tgt_xyz, max_dist=25.0, iters=40):
 
 
 def _auto_nose(xp, yp, zp):
-    """鼻=一番手前(高さ最大)の位置を自動検出(外れ値に強い中央値)。"""
+    """鼻=中央付近(|x|<400で腕を除外)の一番手前(高さ最大)を自動検出。"""
     if len(zp) == 0:
         return (0.0, 0.0)
-    m = zp >= np.percentile(zp, 98)
-    return (float(np.median(xp[m])), float(np.median(yp[m])))
+    c = np.abs(xp) < 400
+    if c.sum() < 20:
+        c = np.ones(len(xp), bool)
+    xc, yc, zc = xp[c], yp[c], zp[c]
+    m = zc >= np.percentile(zc, 98)
+    return (float(np.median(xc[m])), float(np.median(yc[m])))
 
 
 def _crop(xp, yp, zp, center, radius):
@@ -146,8 +150,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         height = float(z.max()) - z               # 手前(鼻)ほど大きい高さ
         return x, y, height
 
-    fB0 = frame_before if frame_before is not None else (nB // 2 if b_is_dat else 0)
-    fA0 = frame_after if frame_after is not None else (nA // 2 if a_is_dat else 0)
+    fB0 = frame_before if frame_before is not None else 0
+    fA0 = frame_after if frame_after is not None else (nA - 1 if a_is_dat else 0)
 
     def topfig(xp, yp, zp, title, center, radius):
         m = _subject_mask(zp)
@@ -266,10 +270,6 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     app = dash.Dash(__name__)
 
-    def cslider(id_, lo, hi, val):
-        return dcc.Slider(round(lo), round(hi), 2, value=round(val), id=id_,
-                          tooltip={"placement": "bottom", "always_visible": True})
-
     frame_ctrls = []
     if b_is_dat:
         frame_ctrls += [html.Label(f"前のコマ (0〜{nB-1})"),
@@ -287,9 +287,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
                           tooltip={"placement": "bottom", "always_visible": True})
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v4 スライダー]"),
-        html.P("黒い円(×が中心)を顔に合わせます。下の『円 左右/上下』スライダーを"
-               "動かして、左=before・右=after それぞれ×を顔の鼻に合わせてください。"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v5]"),
+        html.P("最初は自動で赤い円が顔(鼻)に出ます。ずれていたら『円 左右/上下』"
+               "スライダーで手動調整できます(before/after それぞれ)。"),
         html.Div([
             dcc.Graph(id="gb", style={"display": "inline-block", "width": "49%"}),
             dcc.Graph(id="ga", style={"display": "inline-block", "width": "49%"})]),
