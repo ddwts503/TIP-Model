@@ -226,6 +226,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
         ax, ay, az = _yaw(ax, ay, az, cA[0], ayaw)
         bx, by, bz, cB = _crop(bx, by, bz, cB, radius)
         ax, ay, az, cA = _crop(ax, ay, az, cA, radius)
+        # 高さを「顔の縁(下から5%)」基準に各自そろえる→前後の突出を公平に比較
+        if len(bz):
+            bz = bz - np.percentile(bz, 5)
+        if len(az):
+            az = az - np.percentile(az, 5)
         if register and len(bz) > 20 and len(az) > 20:
             reg = register_icp(np.column_stack([ax, ay, az]),
                                np.column_stack([bx, by, bz]))
@@ -346,7 +351,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v10]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v11]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -378,8 +383,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Label("アフター 左右回転(度)"),
         dcc.Slider(-45, 45, 1, value=0, id="ayaw",
                    tooltip={"placement": "bottom", "always_visible": True}),
-        html.Label("顔の範囲(半径 mm)= 円の大きさ"),
-        dcc.Slider(40, 250, 1, value=150, id="r",
+        html.Label("顔の範囲(半径 mm)= 円の大きさ(顔だけに小さく)"),
+        dcc.Slider(30, 200, 1, value=85, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("断面の向き(切り替えるとスライス線の位置はリセット)"),
         dcc.RadioItems(id="sdir", value="horiz", inline=True,
