@@ -153,7 +153,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     fB0 = frame_before if frame_before is not None else 0
     fA0 = frame_after if frame_after is not None else (nA - 1 if a_is_dat else 0)
 
-    def topfig(xp, yp, zp, title, center, radius):
+    def topfig(xp, yp, zp, title, center, radius, sdir=None, h=0.0):
         m = _subject_mask(zp)
         fig = go.Figure(go.Scattergl(
             x=xp[m], y=yp[m], mode="markers",
@@ -167,6 +167,16 @@ def run_compare(before_path, after_path, *, frame_before=None,
         fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="markers",
                                  marker=dict(color="red", size=16, symbol="x",
                                              line=dict(color="white", width=1))))
+        # スライス線(緑)= いまどこを切っているか
+        if sdir is not None and m.sum() > 0:
+            xs0, xs1 = float(xp[m].min()), float(xp[m].max())
+            ys0, ys1 = float(yp[m].min()), float(yp[m].max())
+            if sdir == "vert":      # 縦スライス=縦線 at x=cx+h
+                fig.add_shape(type="line", x0=cx + h, x1=cx + h, y0=ys0, y1=ys1,
+                              line=dict(color="lime", width=3), layer="above")
+            else:                   # 横スライス=横線 at y=cy+h
+                fig.add_shape(type="line", x0=xs0, x1=xs1, y0=cy + h, y1=cy + h,
+                              line=dict(color="lime", width=3), layer="above")
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         fig.update_layout(title=title, height=380, showlegend=False,
                           margin=dict(l=20, r=10, t=40, b=20))
@@ -372,8 +382,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA, sdir)
         bxx, byy, bzz, axx, ayy, azz = (load_align(before_path, int(fB), b_is_dat)
                                         + load_align(after_path, int(fA), a_is_dat))
-        gb = topfig(bxx, byy, bzz, f"before (frame {fB})", cB, float(r))
-        ga = topfig(axx, ayy, azz, f"after (frame {fA})", cA, float(r))
+        gb = topfig(bxx, byy, bzz, f"before (frame {fB})", cB, float(r),
+                    sdir=sdir, h=float(h))
+        ga = topfig(axx, ayy, azz, f"after (frame {fA})", cA, float(r),
+                    sdir=sdir, h=float(h))
         secf, table, verdict = make_outputs(st)
         return gb, ga, secf, table, verdict
 
