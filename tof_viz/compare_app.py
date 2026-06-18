@@ -69,6 +69,20 @@ def _auto_nose(xp, yp, zp):
     return (float(np.median(xc[m])), float(np.median(yc[m])))
 
 
+def _yaw(x, y, h, cx, deg):
+    """中心軸(x=cx の縦軸)まわりに左右回転(頭の向き直し)。x と 高さ h を回す。"""
+    if not deg or len(x) == 0:
+        return x, y, h
+    a = np.radians(deg)
+    c, s = np.cos(a), np.sin(a)
+    ch = float(np.median(h))
+    dx = x - cx
+    dh = h - ch
+    xn = cx + dx * c - dh * s
+    hn = ch + dx * s + dh * c
+    return xn, y, hn
+
+
 def _crop(xp, yp, zp, center, radius):
     """center=(cx,cy) の周り半径 radius[mm] だけ残す。center None なら鼻を自動検出。"""
     if center is None:
@@ -189,9 +203,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
                           margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
-    def compute(fB, fA, h, radius, register, cB, cA, sdir, rot=0.0):
-        bx, by, bz = load_align(before_path, fB, b_is_dat, rot)
-        ax, ay, az = load_align(after_path, fA, a_is_dat, rot)
+    def compute(fB, fA, h, radius, register, cB, cA, sdir, byaw=0.0, ayaw=0.0):
+        bx, by, bz = load_align(before_path, fB, b_is_dat)
+        ax, ay, az = load_align(after_path, fA, a_is_dat)
+        # 顔の左右向き補正(中心軸まわり)を before/after 別々に
+        bx, by, bz = _yaw(bx, by, bz, cB[0], byaw)
+        ax, ay, az = _yaw(ax, ay, az, cA[0], ayaw)
         bx, by, bz, cB = _crop(bx, by, bz, cB, radius)
         ax, ay, az, cA = _crop(ax, ay, az, cA, radius)
         if register and len(bz) > 20 and len(az) > 20:
@@ -332,8 +349,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Div(frame_ctrls),
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
                       "value": "on"}], value=["on"], style={"fontSize": "16px"}),
-        html.Label("傾き補正(度)= 体の軸をまっすぐに"),
-        dcc.Slider(-60, 60, 1, value=0, id="rot",
+        html.B("顔の左右向き補正(中心軸まわり・別々)"),
+        html.Label("before 左右回転(度)"),
+        dcc.Slider(-45, 45, 1, value=0, id="byaw",
+                   tooltip={"placement": "bottom", "always_visible": True}),
+        html.Label("after 左右回転(度)"),
+        dcc.Slider(-45, 45, 1, value=0, id="ayaw",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
         dcc.Slider(40, 250, 1, value=150, id="r",
@@ -376,14 +397,14 @@ def run_compare(before_path, after_path, *, frame_before=None,
             Output("ver", "children")]
     ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
            Input("cb", "data"), Input("ca", "data"), Input("sdir", "value"),
-           Input("rot", "value")]
+           Input("byaw", "value"), Input("ayaw", "value")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, cb, ca, sdir, rot, *frames):
+    def _update(r, h, reg, cb, ca, sdir, byaw, ayaw, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
@@ -391,9 +412,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
         cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
         cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
         st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA,
-                     sdir, float(rot))
-        bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat, float(rot))
-        axx, ayy, azz = load_align(after_path, int(fA), a_is_dat, float(rot))
+                     sdir, float(byaw), float(ayaw))
+        bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat)
+        axx, ayy, azz = load_align(after_path, int(fA), a_is_dat)
+        bxx, byy, bzz = _yaw(bxx, byy, bzz, cB[0], float(byaw))
+        axx, ayy, azz = _yaw(axx, ayy, azz, cA[0], float(ayaw))
         gb = topfig(bxx, byy, bzz, f"before (frame {fB})", cB, float(r),
                     sdir=sdir, h=float(h))
         ga = topfig(axx, ayy, azz, f"after (frame {fA})", cA, float(r),
