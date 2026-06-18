@@ -359,7 +359,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v15]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v16]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -391,6 +391,17 @@ def run_compare(before_path, after_path, *, frame_before=None,
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("アフター 左右回転(度)"),
         dcc.Slider(-45, 45, 1, value=0, id="ayaw",
+                   tooltip={"placement": "bottom", "always_visible": True}),
+        html.B("円の位置の微調整(1mm刻み・ドラッグの後の細かい合わせ)"),
+        html.Label("ビフォー 円 左右 / 上下"),
+        dcc.Slider(-60, 60, 1, value=0, id="bfx",
+                   tooltip={"placement": "bottom", "always_visible": True}),
+        dcc.Slider(-60, 60, 1, value=0, id="bfy",
+                   tooltip={"placement": "bottom", "always_visible": True}),
+        html.Label("アフター 円 左右 / 上下"),
+        dcc.Slider(-60, 60, 1, value=0, id="afx",
+                   tooltip={"placement": "bottom", "always_visible": True}),
+        dcc.Slider(-60, 60, 1, value=0, id="afy",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("顔の範囲(半径 mm)= 円の大きさ(顔だけに小さく)"),
         dcc.Slider(30, 200, 1, value=85, id="r",
@@ -483,7 +494,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
            Input("reg", "value"), Input("cb", "data"), Input("ca", "data"),
            Input("sdir", "value"), Input("byaw", "value"), Input("ayaw", "value"),
            Input("broll", "value"), Input("aroll", "value"),
-           Input("thick", "value")]
+           Input("thick", "value"), Input("bfx", "value"), Input("bfy", "value"),
+           Input("afx", "value"), Input("afy", "value")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
@@ -491,13 +503,16 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     @app.callback(*outs, *ins)
     def _update(r, hposB, hposA, reg, cb, ca, sdir, byaw, ayaw, broll, aroll,
-                thick, *frames):
+                thick, bfx, bfy, afx, afy, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = frames[i] if a_is_dat else fA0
-        cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
-        cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
+        # 円の中心 = ドラッグ位置 + 微調整(1mm刻み)
+        cB = ((float(cb[0]) if cb else dbx) + float(bfx),
+              (float(cb[1]) if cb else dby) + float(bfy))
+        cA = ((float(ca[0]) if ca else dax) + float(afx),
+              (float(ca[1]) if ca else day) + float(afy))
         pB = float(hposB) if hposB is not None else None
         pA = float(hposA) if hposA is not None else None
         st = compute(int(fB), int(fA), pB, pA, float(r), bool(reg), cB, cA,
