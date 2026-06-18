@@ -159,7 +159,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
             x=xp[m], y=yp[m], mode="markers",
             marker=dict(size=3, color=zp[m], colorscale="Turbo", opacity=0.55)))
         cx, cy = center
-        # 円は shape(レイヤ above)で点群の上に。中心は赤い×マーカー(SVG)で前面に
+        # ドラッグで動かせる円(赤・前面)。中心は赤い×
         fig.add_shape(type="circle", x0=cx - radius, y0=cy - radius,
                       x1=cx + radius, y1=cy + radius, layer="above",
                       line=dict(color="red", width=4))
@@ -286,13 +286,19 @@ def run_compare(before_path, after_path, *, frame_before=None,
         return dcc.Slider(round(lo), round(hi), 5, value=round(val), id=id_,
                           tooltip={"placement": "bottom", "always_visible": True})
 
+    editcfg = {"editable": True, "edits": {"shapePosition": True}}
+
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v5]"),
-        html.P("最初は自動で赤い円が顔(鼻)に出ます。ずれていたら『円 左右/上下』"
-               "スライダーで手動調整できます(before/after それぞれ)。"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v6 ドラッグ可]"),
+        html.P("最初は自動で赤い円が顔(鼻)に出ます。ずれていたら円をマウスで"
+               "ドラッグするか、下の『円 左右/上下』スライダーで微調整できます。"),
         html.Div([
-            dcc.Graph(id="gb", style={"display": "inline-block", "width": "49%"}),
-            dcc.Graph(id="ga", style={"display": "inline-block", "width": "49%"})]),
+            dcc.Graph(id="gb", config=editcfg,
+                      style={"display": "inline-block", "width": "49%"}),
+            dcc.Graph(id="ga", config=editcfg,
+                      style={"display": "inline-block", "width": "49%"})]),
+        dcc.Store(id="cb", data=[dbx, dby]),
+        dcc.Store(id="ca", data=[dax, day]),
         html.Div(frame_ctrls),
         html.B("before: 円 左右 / 上下"),
         cslider("bxc", xlo, xhi, dbx), cslider("byc", ylo, yhi, dby),
@@ -312,25 +318,54 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.P("円を顔に合わせ→範囲/高さを調整→表と判定を確認。終了はControl+C。"),
     ], style={"fontFamily": "sans-serif", "margin": "20px"})
 
+    def _from_relayout(rl, fallback):
+        if rl and "shapes[0].x0" in rl:
+            try:
+                return [ (rl["shapes[0].x0"] + rl["shapes[0].x1"]) / 2,
+                         (rl["shapes[0].y0"] + rl["shapes[0].y1"]) / 2 ]
+            except Exception:
+                pass
+        return fallback
+
+    # ドラッグ or スライダー → 中心ストア(どちらが動いたかで決める)
+    @app.callback(Output("cb", "data"), Input("gb", "relayoutData"),
+                  Input("bxc", "value"), Input("byc", "value"),
+                  State("cb", "data"))
+    def _cb(rl, bxc, byc, cur):
+        tid = (dash.callback_context.triggered[0]["prop_id"]
+               if dash.callback_context.triggered else "")
+        if tid.startswith("gb."):
+            return _from_relayout(rl, cur)
+        return [float(bxc), float(byc)]
+
+    @app.callback(Output("ca", "data"), Input("ga", "relayoutData"),
+                  Input("axc", "value"), Input("ayc", "value"),
+                  State("ca", "data"))
+    def _ca(rl, axc, ayc, cur):
+        tid = (dash.callback_context.triggered[0]["prop_id"]
+               if dash.callback_context.triggered else "")
+        if tid.startswith("ga."):
+            return _from_relayout(rl, cur)
+        return [float(axc), float(ayc)]
+
     outs = [Output("gb", "figure"), Output("ga", "figure"),
             Output("sec", "figure"), Output("tbl", "children"),
             Output("ver", "children")]
     ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
-           Input("bxc", "value"), Input("byc", "value"),
-           Input("axc", "value"), Input("ayc", "value")]
+           Input("cb", "data"), Input("ca", "data")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, bxc, byc, axc, ayc, *frames):
+    def _update(r, h, reg, cb, ca, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = frames[i] if a_is_dat else fA0
-        cB = (float(bxc), float(byc))
-        cA = (float(axc), float(ayc))
+        cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
+        cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
         st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA)
         bxx, byy, bzz, axx, ayy, azz = (load_align(before_path, int(fB), b_is_dat)
                                         + load_align(after_path, int(fA), a_is_dat))
