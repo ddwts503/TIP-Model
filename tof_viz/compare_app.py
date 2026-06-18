@@ -202,11 +202,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
             if sdir == "vert":      # 縦スライス=縦線
                 px = slicepos if slicepos is not None else cx
                 fig.add_shape(type="line", x0=px, x1=px, y0=ys0, y1=ys1,
-                              line=dict(color="lime", width=6), layer="above")
+                              line=dict(color="lime", width=1), layer="above")
             else:                   # 横スライス=横線
                 py = slicepos if slicepos is not None else cy
                 fig.add_shape(type="line", x0=xs0, x1=xs1, y0=py, y1=py,
-                              line=dict(color="lime", width=6), layer="above")
+                              line=dict(color="lime", width=1), layer="above")
         fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="markers",
                                  marker=dict(color="red", size=14, symbol="x",
                                              line=dict(color="white", width=1))))
@@ -359,7 +359,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v18]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v19]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
