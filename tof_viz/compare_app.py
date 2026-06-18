@@ -250,12 +250,22 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     def make_outputs(state):
         (bx, by, bz, ax, ay, az, mB, mA, volB, volA, axis) = state
+        # 左右(横方向)を各曲線の中心でそろえて重ねる(高さはそのまま)
+        def _xc(curve):
+            if len(curve) == 0:
+                return curve
+            cc = (curve[:, 0].min() + curve[:, 0].max()) / 2
+            out = curve.copy()
+            out[:, 0] = out[:, 0] - cc
+            return out
+        cb_c = _xc(mB["curve"])
+        ca_c = _xc(mA["curve"])
         secf = go.Figure()
-        if len(mB["curve"]):
-            secf.add_trace(go.Scatter(x=mB["curve"][:, 0], y=mB["curve"][:, 1],
+        if len(cb_c):
+            secf.add_trace(go.Scatter(x=cb_c[:, 0], y=cb_c[:, 1],
                            mode="lines+markers", name="ビフォー", line_color="blue"))
-        if len(mA["curve"]):
-            secf.add_trace(go.Scatter(x=mA["curve"][:, 0], y=mA["curve"][:, 1],
+        if len(ca_c):
+            secf.add_trace(go.Scatter(x=ca_c[:, 0], y=ca_c[:, 1],
                            mode="lines+markers", name="アフター", line_color="red"))
         secf.update_yaxes(scaleanchor="x", scaleratio=1)
         if axis == "x":   # 縦スライス: 横顔プロフィール(上下 × 突出)
@@ -349,7 +359,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v13]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v14]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
