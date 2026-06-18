@@ -359,7 +359,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v14]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v15]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -403,6 +403,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Label("断面の厚み(mm)"),
         dcc.Slider(1, 20, 1, value=5, id="thick",
                    tooltip={"placement": "bottom", "always_visible": True}),
+        html.Label("ビフォー 断面位置の微調整(中心から mm・1mm刻み)"),
+        dcc.Slider(-150, 150, 1, value=0, id="sB",
+                   tooltip={"placement": "bottom", "always_visible": True}),
+        html.Label("アフター 断面位置の微調整(中心から mm・1mm刻み)"),
+        dcc.Slider(-150, 150, 1, value=0, id="sA",
+                   tooltip={"placement": "bottom", "always_visible": True}),
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
         html.H3(id="ver"),
@@ -437,28 +443,38 @@ def run_compare(before_path, after_path, *, frame_before=None,
             return (rl["shapes[1].y0"] + rl["shapes[1].y1"]) / 2
         return None
 
-    # 緑のスライス線をドラッグ → 位置ストア(ビフォー/アフター別々)。向き変更でリセット
+    # 緑のスライス線: ドラッグ or 1mm刻みスライダー(中心からのオフセット)。別々
     @app.callback(Output("hposB", "data"), Input("gb", "relayoutData"),
-                  Input("sdir", "value"), State("hposB", "data"),
+                  Input("sB", "value"), Input("sdir", "value"),
+                  State("hposB", "data"), State("cb", "data"),
                   prevent_initial_call=True)
-    def _hposB(rlb, sdir, cur):
+    def _hposB(rlb, soff, sdir, cur, cb):
         tid = (dash.callback_context.triggered[0]["prop_id"]
                if dash.callback_context.triggered else "")
         if tid.startswith("sdir"):
             return None
-        p = _line_pos(rlb, sdir)
-        return p if p is not None else cur
+        if tid.startswith("gb"):
+            p = _line_pos(rlb, sdir)
+            return p if p is not None else cur
+        ci = 0 if sdir == "vert" else 1
+        c = float(cb[ci]) if cb else 0.0
+        return c + float(soff)
 
     @app.callback(Output("hposA", "data"), Input("ga", "relayoutData"),
-                  Input("sdir", "value"), State("hposA", "data"),
+                  Input("sA", "value"), Input("sdir", "value"),
+                  State("hposA", "data"), State("ca", "data"),
                   prevent_initial_call=True)
-    def _hposA(rla, sdir, cur):
+    def _hposA(rla, soff, sdir, cur, ca):
         tid = (dash.callback_context.triggered[0]["prop_id"]
                if dash.callback_context.triggered else "")
         if tid.startswith("sdir"):
             return None
-        p = _line_pos(rla, sdir)
-        return p if p is not None else cur
+        if tid.startswith("ga"):
+            p = _line_pos(rla, sdir)
+            return p if p is not None else cur
+        ci = 0 if sdir == "vert" else 1
+        c = float(ca[ci]) if ca else 0.0
+        return c + float(soff)
 
     outs = [Output("gb", "figure"), Output("ga", "figure"),
             Output("sec", "figure"), Output("tbl", "children"),
