@@ -216,7 +216,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
         return fig
 
     def compute(fB, fA, slicepos, radius, register, cB, cA, sdir,
-                byaw=0.0, ayaw=0.0, broll=0.0, aroll=0.0):
+                byaw=0.0, ayaw=0.0, broll=0.0, aroll=0.0, thick=5.0):
         bx, by, bz = load_align(before_path, fB, b_is_dat)
         ax, ay, az = load_align(after_path, fA, a_is_dat)
         # ビフォー/アフター別々に: 傾き(軸回転 roll)→ 左右向き(yaw)
@@ -246,8 +246,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         else:                       # 横スライス(上下位置 y で切る)=左右の断面
             axis = "y"
             pos = slicepos if slicepos is not None else cB[1]
-        mB = face_metrics(bx, by, bz, axis=axis, position=pos)
-        mA = face_metrics(ax, ay, az, axis=axis, position=pos)
+        mB = face_metrics(bx, by, bz, axis=axis, position=pos, thickness=thick)
+        mA = face_metrics(ax, ay, az, axis=axis, position=pos, thickness=thick)
         return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, pos, axis)
 
     def make_outputs(state):
@@ -351,7 +351,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v11]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v12]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -391,6 +391,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
                        options=[{"label": " 横スライス(左右の断面)", "value": "horiz"},
                                 {"label": " 縦スライス(横顔プロフィール)", "value": "vert"}],
                        style={"fontSize": "16px"}),
+        html.Label("断面の厚み(mm)"),
+        dcc.Slider(1, 20, 1, value=5, id="thick",
+                   tooltip={"placement": "bottom", "always_visible": True}),
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
         html.H3(id="ver"),
@@ -445,14 +448,16 @@ def run_compare(before_path, after_path, *, frame_before=None,
     ins = [Input("r", "value"), Input("hpos", "data"), Input("reg", "value"),
            Input("cb", "data"), Input("ca", "data"), Input("sdir", "value"),
            Input("byaw", "value"), Input("ayaw", "value"),
-           Input("broll", "value"), Input("aroll", "value")]
+           Input("broll", "value"), Input("aroll", "value"),
+           Input("thick", "value")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, hpos, reg, cb, ca, sdir, byaw, ayaw, broll, aroll, *frames):
+    def _update(r, hpos, reg, cb, ca, sdir, byaw, ayaw, broll, aroll,
+                thick, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
@@ -461,7 +466,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
         sp = float(hpos) if hpos is not None else None
         st = compute(int(fB), int(fA), sp, float(r), bool(reg), cB, cA,
-                     sdir, float(byaw), float(ayaw), float(broll), float(aroll))
+                     sdir, float(byaw), float(ayaw), float(broll), float(aroll),
+                     float(thick))
         bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat)
         axx, ayy, azz = load_align(after_path, int(fA), a_is_dat)
         bxx, byy = _roll(bxx, byy, cB[0], cB[1], float(broll))
