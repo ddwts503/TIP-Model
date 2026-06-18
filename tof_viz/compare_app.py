@@ -215,7 +215,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
                           margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
-    def compute(fB, fA, slicepos, radius, register, cB, cA, sdir,
+    def compute(fB, fA, posB, posA, radius, register, cB, cA, sdir,
                 byaw=0.0, ayaw=0.0, broll=0.0, aroll=0.0, thick=5.0):
         bx, by, bz = load_align(before_path, fB, b_is_dat)
         ax, ay, az = load_align(after_path, fA, a_is_dat)
@@ -239,19 +239,17 @@ def run_compare(before_path, after_path, *, frame_before=None,
         baseA = float(np.percentile(az, 10)) if len(az) else 0.0
         volB = volume_face(bx, by, bz, baseB)
         volA = volume_face(ax, ay, az, baseA)
-        # スライス位置(絶対座標)。未指定なら顔の中心(円の中心)
-        if sdir == "vert":          # 縦スライス(左右位置 x で切る)=横顔プロフィール
-            axis = "x"
-            pos = slicepos if slicepos is not None else cB[0]
-        else:                       # 横スライス(上下位置 y で切る)=左右の断面
-            axis = "y"
-            pos = slicepos if slicepos is not None else cB[1]
-        mB = face_metrics(bx, by, bz, axis=axis, position=pos, thickness=thick)
-        mA = face_metrics(ax, ay, az, axis=axis, position=pos, thickness=thick)
-        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, pos, axis)
+        # スライス位置(絶対座標)はビフォー/アフター別々。未指定なら各円の中心
+        ci = 0 if sdir == "vert" else 1
+        axis = "x" if sdir == "vert" else "y"
+        pB = posB if posB is not None else cB[ci]
+        pA = posA if posA is not None else cA[ci]
+        mB = face_metrics(bx, by, bz, axis=axis, position=pB, thickness=thick)
+        mA = face_metrics(ax, ay, az, axis=axis, position=pA, thickness=thick)
+        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, axis)
 
     def make_outputs(state):
-        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, pos, axis) = state
+        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, axis) = state
         secf = go.Figure()
         if len(mB["curve"]):
             secf.add_trace(go.Scatter(x=mB["curve"][:, 0], y=mB["curve"][:, 1],
@@ -351,7 +349,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v12]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v13]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -361,7 +359,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
                       style={"display": "inline-block", "width": "49%"})]),
         dcc.Store(id="cb", data=[dbx, dby]),
         dcc.Store(id="ca", data=[dax, day]),
-        dcc.Store(id="hpos", data=None),
+        dcc.Store(id="hposB", data=None),
+        dcc.Store(id="hposA", data=None),
         html.Div(frame_ctrls),
         html.Div(dcc.Checklist(id="reg",
                  options=[{"label": "  ✔ 2つの顔を自動で重ねて比較する"
@@ -428,26 +427,35 @@ def run_compare(before_path, after_path, *, frame_before=None,
             return (rl["shapes[1].y0"] + rl["shapes[1].y1"]) / 2
         return None
 
-    # 緑のスライス線をドラッグ → 位置ストア。向き変更でリセット
-    @app.callback(Output("hpos", "data"), Input("gb", "relayoutData"),
-                  Input("ga", "relayoutData"), Input("sdir", "value"),
-                  State("hpos", "data"), prevent_initial_call=True)
-    def _hpos(rlb, rla, sdir, cur):
+    # 緑のスライス線をドラッグ → 位置ストア(ビフォー/アフター別々)。向き変更でリセット
+    @app.callback(Output("hposB", "data"), Input("gb", "relayoutData"),
+                  Input("sdir", "value"), State("hposB", "data"),
+                  prevent_initial_call=True)
+    def _hposB(rlb, sdir, cur):
         tid = (dash.callback_context.triggered[0]["prop_id"]
                if dash.callback_context.triggered else "")
         if tid.startswith("sdir"):
             return None
         p = _line_pos(rlb, sdir)
-        if p is None:
-            p = _line_pos(rla, sdir)
+        return p if p is not None else cur
+
+    @app.callback(Output("hposA", "data"), Input("ga", "relayoutData"),
+                  Input("sdir", "value"), State("hposA", "data"),
+                  prevent_initial_call=True)
+    def _hposA(rla, sdir, cur):
+        tid = (dash.callback_context.triggered[0]["prop_id"]
+               if dash.callback_context.triggered else "")
+        if tid.startswith("sdir"):
+            return None
+        p = _line_pos(rla, sdir)
         return p if p is not None else cur
 
     outs = [Output("gb", "figure"), Output("ga", "figure"),
             Output("sec", "figure"), Output("tbl", "children"),
             Output("ver", "children")]
-    ins = [Input("r", "value"), Input("hpos", "data"), Input("reg", "value"),
-           Input("cb", "data"), Input("ca", "data"), Input("sdir", "value"),
-           Input("byaw", "value"), Input("ayaw", "value"),
+    ins = [Input("r", "value"), Input("hposB", "data"), Input("hposA", "data"),
+           Input("reg", "value"), Input("cb", "data"), Input("ca", "data"),
+           Input("sdir", "value"), Input("byaw", "value"), Input("ayaw", "value"),
            Input("broll", "value"), Input("aroll", "value"),
            Input("thick", "value")]
     if b_is_dat:
@@ -456,7 +464,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, hpos, reg, cb, ca, sdir, byaw, ayaw, broll, aroll,
+    def _update(r, hposB, hposA, reg, cb, ca, sdir, byaw, ayaw, broll, aroll,
                 thick, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
@@ -464,8 +472,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
         fA = frames[i] if a_is_dat else fA0
         cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
         cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
-        sp = float(hpos) if hpos is not None else None
-        st = compute(int(fB), int(fA), sp, float(r), bool(reg), cB, cA,
+        pB = float(hposB) if hposB is not None else None
+        pA = float(hposA) if hposA is not None else None
+        st = compute(int(fB), int(fA), pB, pA, float(r), bool(reg), cB, cA,
                      sdir, float(byaw), float(ayaw), float(broll), float(aroll),
                      float(thick))
         bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat)
@@ -474,9 +483,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         axx, ayy = _roll(axx, ayy, cA[0], cA[1], float(aroll))
         bxx, byy, bzz = _yaw(bxx, byy, bzz, cB[0], float(byaw))
         axx, ayy, azz = _yaw(axx, ayy, azz, cA[0], float(ayaw))
-        # スライス線の位置(未ドラッグなら円の中心)
-        spb = sp if sp is not None else (cB[0] if sdir == "vert" else cB[1])
-        spa = sp if sp is not None else (cA[0] if sdir == "vert" else cA[1])
+        # スライス線の位置(未ドラッグなら各円の中心)。ビフォー/アフター別々
+        ci = 0 if sdir == "vert" else 1
+        spb = pB if pB is not None else cB[ci]
+        spa = pA if pA is not None else cA[ci]
         gb = topfig(bxx, byy, bzz, f"ビフォー (コマ {fB})", cB, float(r),
                     sdir=sdir, slicepos=spb)
         ga = topfig(axx, ayy, azz, f"アフター (コマ {fA})", cA, float(r),
