@@ -359,7 +359,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v16]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v17]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -404,7 +404,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Slider(-60, 60, 1, value=0, id="afy",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("顔の範囲(半径 mm)= 円の大きさ(顔だけに小さく)"),
-        dcc.Slider(30, 200, 1, value=85, id="r",
+        dcc.Slider(30, 300, 1, value=85, id="r",
+                   marks={30: "30", 100: "100", 200: "200", 300: "300"},
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("断面の向き(切り替えるとスライス線の位置はリセット)"),
         dcc.RadioItems(id="sdir", value="horiz", inline=True,
