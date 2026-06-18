@@ -69,6 +69,16 @@ def _auto_nose(xp, yp, zp):
     return (float(np.median(xc[m])), float(np.median(yc[m])))
 
 
+def _roll(x, y, cx, cy, deg):
+    """画面内(x-y)で中心(cx,cy)まわりに回転=体軸の傾き補正。"""
+    if not deg or len(x) == 0:
+        return x, y
+    a = np.radians(deg)
+    c, s = np.cos(a), np.sin(a)
+    dx, dy = x - cx, y - cy
+    return cx + dx * c - dy * s, cy + dx * s + dy * c
+
+
 def _yaw(x, y, h, cx, deg):
     """中心軸(x=cx の縦軸)まわりに左右回転(頭の向き直し)。x と 高さ h を回す。"""
     if not deg or len(x) == 0:
@@ -203,10 +213,13 @@ def run_compare(before_path, after_path, *, frame_before=None,
                           margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
-    def compute(fB, fA, h, radius, register, cB, cA, sdir, byaw=0.0, ayaw=0.0):
+    def compute(fB, fA, h, radius, register, cB, cA, sdir,
+                byaw=0.0, ayaw=0.0, broll=0.0, aroll=0.0):
         bx, by, bz = load_align(before_path, fB, b_is_dat)
         ax, ay, az = load_align(after_path, fA, a_is_dat)
-        # 顔の左右向き補正(中心軸まわり)を before/after 別々に
+        # ビフォー/アフター別々に: 傾き(軸回転 roll)→ 左右向き(yaw)
+        bx, by = _roll(bx, by, cB[0], cB[1], broll)
+        ax, ay = _roll(ax, ay, cA[0], cA[1], aroll)
         bx, by, bz = _yaw(bx, by, bz, cB[0], byaw)
         ax, ay, az = _yaw(ax, ay, az, cA[0], ayaw)
         bx, by, bz, cB = _crop(bx, by, bz, cB, radius)
@@ -240,10 +253,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         secf = go.Figure()
         if len(mB["curve"]):
             secf.add_trace(go.Scatter(x=mB["curve"][:, 0], y=mB["curve"][:, 1],
-                           mode="lines+markers", name="before", line_color="blue"))
+                           mode="lines+markers", name="ビフォー", line_color="blue"))
         if len(mA["curve"]):
             secf.add_trace(go.Scatter(x=mA["curve"][:, 0], y=mA["curve"][:, 1],
-                           mode="lines+markers", name="after", line_color="red"))
+                           mode="lines+markers", name="アフター", line_color="red"))
         secf.update_yaxes(scaleanchor="x", scaleratio=1)
         if axis == "x":   # 縦スライス: 横顔プロフィール(上下 × 突出)
             title = f"縦スライス(中心から{h:.0f}mm)= 横顔プロフィール"
@@ -251,7 +264,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
         else:             # 横スライス: 左右の断面(左右 × 突出)
             title = f"横スライス(鼻の高さから{h:.0f}mm)= 左右の断面"
             xlab, ylab = "左右 [mm]", "突出(高さ)[mm]"
-        secf.update_layout(title=title + " 青=before 赤=after", height=380,
+        secf.update_layout(title=title + "  青=ビフォー 赤=アフター", height=380,
                            xaxis_title=xlab, yaxis_title=ylab)
         wB, lB, dB = face_dims(bx, by, bz)
         wA, lA, dA = face_dims(ax, ay, az)
@@ -267,7 +280,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
                             html.Td(f"{b:.1f}{unit}"), html.Td(f"{a:.1f}{unit}"),
                             html.Td(f"{d:+.1f} ({pct:+.1f}%){arrow}", style=style)])
         table = html.Table([
-            html.Thead(html.Tr([html.Th("項目"), html.Th("前"), html.Th("後"),
+            html.Thead(html.Tr([html.Th("項目"), html.Th("ビフォー"), html.Th("アフター"),
                                 html.Th("変化")])),
             html.Tbody([
                 trow("◎ 顔幅(左右)→減れば小顔", wB, wA, "mm", key=True),
@@ -319,12 +332,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     frame_ctrls = []
     if b_is_dat:
-        frame_ctrls += [html.Label(f"前のコマ (0〜{nB-1})"),
+        frame_ctrls += [html.Label(f"ビフォーのコマ (0〜{nB-1})"),
                         dcc.Slider(0, nB - 1, max(1, nB // 200), value=fB0,
                                    id="fb", tooltip={"placement": "bottom",
                                    "always_visible": True})]
     if a_is_dat:
-        frame_ctrls += [html.Label(f"後のコマ (0〜{nA-1})"),
+        frame_ctrls += [html.Label(f"アフターのコマ (0〜{nA-1})"),
                         dcc.Slider(0, nA - 1, max(1, nA // 200), value=fA0,
                                    id="fa", tooltip={"placement": "bottom",
                                    "always_visible": True})]
@@ -338,7 +351,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     app.layout = html.Div([
         html.H2("ビフォー・アフター 小顔チェック  [版 v7 ドラッグ]"),
         html.P("赤い円の内側をマウスでつかんで、顔(鼻)の上にドラッグしてください。"
-               "左=before、右=after。最初は自動で顔に出ます。"),
+               "左=ビフォー、右=アフター。最初は自動で顔に出ます。"),
         html.Div([
             dcc.Graph(id="gb", config=editcfg,
                       style={"display": "inline-block", "width": "49%"}),
@@ -349,11 +362,18 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Div(frame_ctrls),
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
                       "value": "on"}], value=["on"], style={"fontSize": "16px"}),
+        html.B("傾き補正(軸回転・ビフォー/アフター別々)"),
+        html.Label("ビフォー 傾き(度)"),
+        dcc.Slider(-60, 60, 1, value=0, id="broll",
+                   tooltip={"placement": "bottom", "always_visible": True}),
+        html.Label("アフター 傾き(度)"),
+        dcc.Slider(-60, 60, 1, value=0, id="aroll",
+                   tooltip={"placement": "bottom", "always_visible": True}),
         html.B("顔の左右向き補正(中心軸まわり・別々)"),
-        html.Label("before 左右回転(度)"),
+        html.Label("ビフォー 左右回転(度)"),
         dcc.Slider(-45, 45, 1, value=0, id="byaw",
                    tooltip={"placement": "bottom", "always_visible": True}),
-        html.Label("after 左右回転(度)"),
+        html.Label("アフター 左右回転(度)"),
         dcc.Slider(-45, 45, 1, value=0, id="ayaw",
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
@@ -397,14 +417,15 @@ def run_compare(before_path, after_path, *, frame_before=None,
             Output("ver", "children")]
     ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
            Input("cb", "data"), Input("ca", "data"), Input("sdir", "value"),
-           Input("byaw", "value"), Input("ayaw", "value")]
+           Input("byaw", "value"), Input("ayaw", "value"),
+           Input("broll", "value"), Input("aroll", "value")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, cb, ca, sdir, byaw, ayaw, *frames):
+    def _update(r, h, reg, cb, ca, sdir, byaw, ayaw, broll, aroll, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
@@ -412,14 +433,16 @@ def run_compare(before_path, after_path, *, frame_before=None,
         cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
         cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
         st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA,
-                     sdir, float(byaw), float(ayaw))
+                     sdir, float(byaw), float(ayaw), float(broll), float(aroll))
         bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat)
         axx, ayy, azz = load_align(after_path, int(fA), a_is_dat)
+        bxx, byy = _roll(bxx, byy, cB[0], cB[1], float(broll))
+        axx, ayy = _roll(axx, ayy, cA[0], cA[1], float(aroll))
         bxx, byy, bzz = _yaw(bxx, byy, bzz, cB[0], float(byaw))
         axx, ayy, azz = _yaw(axx, ayy, azz, cA[0], float(ayaw))
-        gb = topfig(bxx, byy, bzz, f"before (frame {fB})", cB, float(r),
+        gb = topfig(bxx, byy, bzz, f"ビフォー (コマ {fB})", cB, float(r),
                     sdir=sdir, h=float(h))
-        ga = topfig(axx, ayy, azz, f"after (frame {fA})", cA, float(r),
+        ga = topfig(axx, ayy, azz, f"アフター (コマ {fA})", cA, float(r),
                     sdir=sdir, h=float(h))
         secf, table, verdict = make_outputs(st)
         return gb, ga, secf, table, verdict
