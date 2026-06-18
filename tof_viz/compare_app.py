@@ -133,9 +133,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
         if a_is_dat:
             nA = toforge.count_frames(after_path)
 
-    @lru_cache(maxsize=64)
-    def load_align(path, frame, is_dat):
-        """カメラそのままの向き(顔は正立)。人物だけ残し、鼻=手前を高さに。"""
+    @lru_cache(maxsize=128)
+    def load_align(path, frame, is_dat, rot=0.0):
+        """カメラそのままの向き(顔は正立)。人物だけ残し、鼻=手前を高さに。
+
+        rot[度]だけ画面内で回転(傾き補正)。
+        """
         if is_dat:
             from . import toforge
             pc = toforge.read_frame(path, frame, min_depth=300.0)
@@ -148,6 +151,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         keep = (z >= znear) & (z <= znear + 350)  # 人物だけ(背景/ベッド除去)
         x, y, z = x[keep], y[keep], z[keep]
         height = float(z.max()) - z               # 手前(鼻)ほど大きい高さ
+        if rot:
+            th = np.radians(rot)
+            c, s = np.cos(th), np.sin(th)
+            x, y = x * c - y * s, x * s + y * c
         return x, y, height
 
     fB0 = frame_before if frame_before is not None else 0
@@ -182,9 +189,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
                           margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
-    def compute(fB, fA, h, radius, register, cB, cA, sdir):
-        bx, by, bz = load_align(before_path, fB, b_is_dat)
-        ax, ay, az = load_align(after_path, fA, a_is_dat)
+    def compute(fB, fA, h, radius, register, cB, cA, sdir, rot=0.0):
+        bx, by, bz = load_align(before_path, fB, b_is_dat, rot)
+        ax, ay, az = load_align(after_path, fA, a_is_dat, rot)
         bx, by, bz, cB = _crop(bx, by, bz, cB, radius)
         ax, ay, az, cA = _crop(ax, ay, az, cA, radius)
         if register and len(bz) > 20 and len(az) > 20:
@@ -325,6 +332,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Div(frame_ctrls),
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
                       "value": "on"}], value=["on"], style={"fontSize": "16px"}),
+        html.Label("傾き補正(度)= 体の軸をまっすぐに"),
+        dcc.Slider(-60, 60, 1, value=0, id="rot",
+                   tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
         dcc.Slider(40, 250, 5, value=150, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
@@ -365,23 +375,25 @@ def run_compare(before_path, after_path, *, frame_before=None,
             Output("sec", "figure"), Output("tbl", "children"),
             Output("ver", "children")]
     ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
-           Input("cb", "data"), Input("ca", "data"), Input("sdir", "value")]
+           Input("cb", "data"), Input("ca", "data"), Input("sdir", "value"),
+           Input("rot", "value")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, cb, ca, sdir, *frames):
+    def _update(r, h, reg, cb, ca, sdir, rot, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = frames[i] if a_is_dat else fA0
         cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
         cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
-        st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA, sdir)
-        bxx, byy, bzz, axx, ayy, azz = (load_align(before_path, int(fB), b_is_dat)
-                                        + load_align(after_path, int(fA), a_is_dat))
+        st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA,
+                     sdir, float(rot))
+        bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat, float(rot))
+        axx, ayy, azz = load_align(after_path, int(fA), a_is_dat, float(rot))
         gb = topfig(bxx, byy, bzz, f"before (frame {fB})", cB, float(r),
                     sdir=sdir, h=float(h))
         ga = topfig(axx, ayy, azz, f"after (frame {fA})", cA, float(r),
