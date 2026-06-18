@@ -184,36 +184,38 @@ def run_compare(before_path, after_path, *, frame_before=None,
     fB0 = frame_before if frame_before is not None else 0
     fA0 = frame_after if frame_after is not None else (nA - 1 if a_is_dat else 0)
 
-    def topfig(xp, yp, zp, title, center, radius, sdir=None, h=0.0):
+    def topfig(xp, yp, zp, title, center, radius, sdir=None, slicepos=None):
         m = _subject_mask(zp)
         fig = go.Figure(go.Scattergl(
             x=xp[m], y=yp[m], mode="markers",
             marker=dict(size=3, color=zp[m], colorscale="Turbo", opacity=0.55)))
         cx, cy = center
-        # ドラッグで動かせる円(赤・半透明の塗り=内側をつかんで移動できる)
+        # shape[0]=ドラッグで動かせる円(赤・半透明の塗り=内側をつかんで移動)
         fig.add_shape(type="circle", x0=cx - radius, y0=cy - radius,
                       x1=cx + radius, y1=cy + radius, layer="above",
                       line=dict(color="red", width=3),
                       fillcolor="rgba(255,0,0,0.12)")
-        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="markers",
-                                 marker=dict(color="red", size=16, symbol="x",
-                                             line=dict(color="white", width=1))))
-        # スライス線(緑)= いまどこを切っているか
+        # shape[1]=ドラッグで動かせるスライス線(緑・太め)
         if sdir is not None and m.sum() > 0:
             xs0, xs1 = float(xp[m].min()), float(xp[m].max())
             ys0, ys1 = float(yp[m].min()), float(yp[m].max())
-            if sdir == "vert":      # 縦スライス=縦線 at x=cx+h
-                fig.add_shape(type="line", x0=cx + h, x1=cx + h, y0=ys0, y1=ys1,
-                              line=dict(color="lime", width=3), layer="above")
-            else:                   # 横スライス=横線 at y=cy+h
-                fig.add_shape(type="line", x0=xs0, x1=xs1, y0=cy + h, y1=cy + h,
-                              line=dict(color="lime", width=3), layer="above")
+            if sdir == "vert":      # 縦スライス=縦線
+                px = slicepos if slicepos is not None else cx
+                fig.add_shape(type="line", x0=px, x1=px, y0=ys0, y1=ys1,
+                              line=dict(color="lime", width=6), layer="above")
+            else:                   # 横スライス=横線
+                py = slicepos if slicepos is not None else cy
+                fig.add_shape(type="line", x0=xs0, x1=xs1, y0=py, y1=py,
+                              line=dict(color="lime", width=6), layer="above")
+        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="markers",
+                                 marker=dict(color="red", size=14, symbol="x",
+                                             line=dict(color="white", width=1))))
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         fig.update_layout(title=title, height=380, showlegend=False,
                           margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
-    def compute(fB, fA, h, radius, register, cB, cA, sdir,
+    def compute(fB, fA, slicepos, radius, register, cB, cA, sdir,
                 byaw=0.0, ayaw=0.0, broll=0.0, aroll=0.0):
         bx, by, bz = load_align(before_path, fB, b_is_dat)
         ax, ay, az = load_align(after_path, fA, a_is_dat)
@@ -232,24 +234,19 @@ def run_compare(before_path, after_path, *, frame_before=None,
         baseA = float(np.percentile(az, 10)) if len(az) else 0.0
         volB = volume_face(bx, by, bz, baseB)
         volA = volume_face(ax, ay, az, baseA)
-        # 鼻(before の最手前=高さ最大)を基準に、スライス位置を決める
-        if len(bz):
-            im = int(np.argmax(bz))
-            nx, ny = float(bx[im]), float(by[im])
-        else:
-            nx, ny = 0.0, 0.0
-        if h is None:
-            h = 0.0
+        # スライス位置(絶対座標)。未指定なら顔の中心(円の中心)
         if sdir == "vert":          # 縦スライス(左右位置 x で切る)=横顔プロフィール
-            axis, pos = "x", nx + h
+            axis = "x"
+            pos = slicepos if slicepos is not None else cB[0]
         else:                       # 横スライス(上下位置 y で切る)=左右の断面
-            axis, pos = "y", ny + h
+            axis = "y"
+            pos = slicepos if slicepos is not None else cB[1]
         mB = face_metrics(bx, by, bz, axis=axis, position=pos)
         mA = face_metrics(ax, ay, az, axis=axis, position=pos)
-        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, axis)
+        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, pos, axis)
 
     def make_outputs(state):
-        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, axis) = state
+        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, pos, axis) = state
         secf = go.Figure()
         if len(mB["curve"]):
             secf.add_trace(go.Scatter(x=mB["curve"][:, 0], y=mB["curve"][:, 1],
@@ -259,10 +256,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
                            mode="lines+markers", name="アフター", line_color="red"))
         secf.update_yaxes(scaleanchor="x", scaleratio=1)
         if axis == "x":   # 縦スライス: 横顔プロフィール(上下 × 突出)
-            title = f"縦スライス(中心から{h:.0f}mm)= 横顔プロフィール"
+            title = "縦スライス = 横顔プロフィール"
             xlab, ylab = "上下 [mm]", "突出(高さ)[mm]"
         else:             # 横スライス: 左右の断面(左右 × 突出)
-            title = f"横スライス(鼻の高さから{h:.0f}mm)= 左右の断面"
+            title = "横スライス = 左右の断面"
             xlab, ylab = "左右 [mm]", "突出(高さ)[mm]"
         secf.update_layout(title=title + "  青=ビフォー 赤=アフター", height=380,
                            xaxis_title=xlab, yaxis_title=ylab)
@@ -349,9 +346,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v7 ドラッグ]"),
-        html.P("赤い円の内側をマウスでつかんで、顔(鼻)の上にドラッグしてください。"
-               "左=ビフォー、右=アフター。最初は自動で顔に出ます。"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v9]"),
+        html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
+               "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
             dcc.Graph(id="gb", config=editcfg,
                       style={"display": "inline-block", "width": "49%"}),
@@ -359,9 +356,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
                       style={"display": "inline-block", "width": "49%"})]),
         dcc.Store(id="cb", data=[dbx, dby]),
         dcc.Store(id="ca", data=[dax, day]),
+        dcc.Store(id="hpos", data=None),
         html.Div(frame_ctrls),
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
-                      "value": "on"}], value=["on"], style={"fontSize": "16px"}),
+                      "value": "on"}], value=[], style={"fontSize": "16px"}),
         html.B("傾き補正(軸回転・ビフォー/アフター別々)"),
         html.Label("ビフォー 傾き(度)"),
         dcc.Slider(-60, 60, 1, value=0, id="broll",
@@ -379,14 +377,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
         dcc.Slider(40, 250, 1, value=150, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
-        html.Label("断面の向き"),
+        html.Label("断面の向き(切り替えるとスライス線の位置はリセット)"),
         dcc.RadioItems(id="sdir", value="horiz", inline=True,
                        options=[{"label": " 横スライス(左右の断面)", "value": "horiz"},
                                 {"label": " 縦スライス(横顔プロフィール)", "value": "vert"}],
                        style={"fontSize": "16px"}),
-        html.Label("断面の位置(中心からのずれ mm。0=鼻の位置)"),
-        dcc.Slider(-120, 120, 1, value=0, id="h",
-                   tooltip={"placement": "bottom", "always_visible": True}),
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
         html.H3(id="ver"),
@@ -412,10 +407,33 @@ def run_compare(before_path, after_path, *, frame_before=None,
     def _ca(rl, cur):
         return _from_relayout(rl, cur)
 
+    def _line_pos(rl, sdir):
+        if not rl:
+            return None
+        if sdir == "vert" and "shapes[1].x0" in rl:
+            return (rl["shapes[1].x0"] + rl["shapes[1].x1"]) / 2
+        if sdir != "vert" and "shapes[1].y0" in rl:
+            return (rl["shapes[1].y0"] + rl["shapes[1].y1"]) / 2
+        return None
+
+    # 緑のスライス線をドラッグ → 位置ストア。向き変更でリセット
+    @app.callback(Output("hpos", "data"), Input("gb", "relayoutData"),
+                  Input("ga", "relayoutData"), Input("sdir", "value"),
+                  State("hpos", "data"), prevent_initial_call=True)
+    def _hpos(rlb, rla, sdir, cur):
+        tid = (dash.callback_context.triggered[0]["prop_id"]
+               if dash.callback_context.triggered else "")
+        if tid.startswith("sdir"):
+            return None
+        p = _line_pos(rlb, sdir)
+        if p is None:
+            p = _line_pos(rla, sdir)
+        return p if p is not None else cur
+
     outs = [Output("gb", "figure"), Output("ga", "figure"),
             Output("sec", "figure"), Output("tbl", "children"),
             Output("ver", "children")]
-    ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
+    ins = [Input("r", "value"), Input("hpos", "data"), Input("reg", "value"),
            Input("cb", "data"), Input("ca", "data"), Input("sdir", "value"),
            Input("byaw", "value"), Input("ayaw", "value"),
            Input("broll", "value"), Input("aroll", "value")]
@@ -425,14 +443,15 @@ def run_compare(before_path, after_path, *, frame_before=None,
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, cb, ca, sdir, byaw, ayaw, broll, aroll, *frames):
+    def _update(r, hpos, reg, cb, ca, sdir, byaw, ayaw, broll, aroll, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = frames[i] if a_is_dat else fA0
         cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
         cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
-        st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA,
+        sp = float(hpos) if hpos is not None else None
+        st = compute(int(fB), int(fA), sp, float(r), bool(reg), cB, cA,
                      sdir, float(byaw), float(ayaw), float(broll), float(aroll))
         bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat)
         axx, ayy, azz = load_align(after_path, int(fA), a_is_dat)
@@ -440,10 +459,13 @@ def run_compare(before_path, after_path, *, frame_before=None,
         axx, ayy = _roll(axx, ayy, cA[0], cA[1], float(aroll))
         bxx, byy, bzz = _yaw(bxx, byy, bzz, cB[0], float(byaw))
         axx, ayy, azz = _yaw(axx, ayy, azz, cA[0], float(ayaw))
+        # スライス線の位置(未ドラッグなら円の中心)
+        spb = sp if sp is not None else (cB[0] if sdir == "vert" else cB[1])
+        spa = sp if sp is not None else (cA[0] if sdir == "vert" else cA[1])
         gb = topfig(bxx, byy, bzz, f"ビフォー (コマ {fB})", cB, float(r),
-                    sdir=sdir, h=float(h))
+                    sdir=sdir, slicepos=spb)
         ga = topfig(axx, ayy, azz, f"アフター (コマ {fA})", cA, float(r),
-                    sdir=sdir, h=float(h))
+                    sdir=sdir, slicepos=spa)
         secf, table, verdict = make_outputs(st)
         return gb, ga, secf, table, verdict
 
