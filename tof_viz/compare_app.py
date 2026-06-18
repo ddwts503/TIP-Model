@@ -346,7 +346,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v9]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v10]"),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -358,8 +358,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Store(id="ca", data=[dax, day]),
         dcc.Store(id="hpos", data=None),
         html.Div(frame_ctrls),
-        dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
-                      "value": "on"}], value=[], style={"fontSize": "16px"}),
+        html.Div(dcc.Checklist(id="reg",
+                 options=[{"label": "  ✔ 2つの顔を自動で重ねて比較する"
+                           "(手動で合わせる時はOFFのまま)", "value": "on"}],
+                 value=[], style={"fontSize": "18px"}),
+                 style={"border": "2px solid #888", "padding": "10px",
+                        "margin": "10px 0", "background": "#f4f4f4"}),
         html.B("傾き補正(軸回転・ビフォー/アフター別々)"),
         html.Label("ビフォー 傾き(度)"),
         dcc.Slider(-60, 60, 1, value=0, id="broll",
