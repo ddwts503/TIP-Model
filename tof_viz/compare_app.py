@@ -159,10 +159,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
             x=xp[m], y=yp[m], mode="markers",
             marker=dict(size=3, color=zp[m], colorscale="Turbo", opacity=0.55)))
         cx, cy = center
-        # ドラッグで動かせる円(赤・前面)。中心は赤い×
+        # ドラッグで動かせる円(赤・半透明の塗り=内側をつかんで移動できる)
         fig.add_shape(type="circle", x0=cx - radius, y0=cy - radius,
                       x1=cx + radius, y1=cy + radius, layer="above",
-                      line=dict(color="red", width=4))
+                      line=dict(color="red", width=3),
+                      fillcolor="rgba(255,0,0,0.12)")
         fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="markers",
                                  marker=dict(color="red", size=16, symbol="x",
                                              line=dict(color="white", width=1))))
@@ -289,9 +290,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v6 ドラッグ可]"),
-        html.P("最初は自動で赤い円が顔(鼻)に出ます。ずれていたら円をマウスで"
-               "ドラッグするか、下の『円 左右/上下』スライダーで微調整できます。"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v7 ドラッグ]"),
+        html.P("赤い円の内側をマウスでつかんで、顔(鼻)の上にドラッグしてください。"
+               "左=before、右=after。最初は自動で顔に出ます。"),
         html.Div([
             dcc.Graph(id="gb", config=editcfg,
                       style={"display": "inline-block", "width": "49%"}),
@@ -300,10 +301,6 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Store(id="cb", data=[dbx, dby]),
         dcc.Store(id="ca", data=[dax, day]),
         html.Div(frame_ctrls),
-        html.B("before: 円 左右 / 上下"),
-        cslider("bxc", xlo, xhi, dbx), cslider("byc", ylo, yhi, dby),
-        html.B("after: 円 左右 / 上下"),
-        cslider("axc", xlo, xhi, dax), cslider("ayc", ylo, yhi, day),
         dcc.Checklist(id="reg", options=[{"label": " 2つの顔を自動で重ねて比較",
                       "value": "on"}], value=["on"], style={"fontSize": "16px"}),
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
@@ -315,38 +312,27 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
         html.H3(id="ver"),
-        html.P("円を顔に合わせ→範囲/高さを調整→表と判定を確認。終了はControl+C。"),
+        html.P("円を顔にドラッグ→範囲/深さを調整→表と判定を確認。終了はControl+C。"),
     ], style={"fontFamily": "sans-serif", "margin": "20px"})
 
     def _from_relayout(rl, fallback):
         if rl and "shapes[0].x0" in rl:
             try:
-                return [ (rl["shapes[0].x0"] + rl["shapes[0].x1"]) / 2,
-                         (rl["shapes[0].y0"] + rl["shapes[0].y1"]) / 2 ]
+                return [(rl["shapes[0].x0"] + rl["shapes[0].x1"]) / 2,
+                        (rl["shapes[0].y0"] + rl["shapes[0].y1"]) / 2]
             except Exception:
                 pass
         return fallback
 
-    # ドラッグ or スライダー → 中心ストア(どちらが動いたかで決める)
     @app.callback(Output("cb", "data"), Input("gb", "relayoutData"),
-                  Input("bxc", "value"), Input("byc", "value"),
-                  State("cb", "data"))
-    def _cb(rl, bxc, byc, cur):
-        tid = (dash.callback_context.triggered[0]["prop_id"]
-               if dash.callback_context.triggered else "")
-        if tid.startswith("gb."):
-            return _from_relayout(rl, cur)
-        return [float(bxc), float(byc)]
+                  State("cb", "data"), prevent_initial_call=True)
+    def _cb(rl, cur):
+        return _from_relayout(rl, cur)
 
     @app.callback(Output("ca", "data"), Input("ga", "relayoutData"),
-                  Input("axc", "value"), Input("ayc", "value"),
-                  State("ca", "data"))
-    def _ca(rl, axc, ayc, cur):
-        tid = (dash.callback_context.triggered[0]["prop_id"]
-               if dash.callback_context.triggered else "")
-        if tid.startswith("ga."):
-            return _from_relayout(rl, cur)
-        return [float(axc), float(ayc)]
+                  State("ca", "data"), prevent_initial_call=True)
+    def _ca(rl, cur):
+        return _from_relayout(rl, cur)
 
     outs = [Output("gb", "figure"), Output("ga", "figure"),
             Output("sec", "figure"), Output("tbl", "children"),
