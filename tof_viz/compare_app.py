@@ -90,11 +90,11 @@ def face_dims(xp, yp, zp):
     return ext(xp), ext(yp), ext(zp)
 
 
-def face_metrics(xp, yp, zp, *, height):
+def face_metrics(xp, yp, zp, *, axis, position, thickness=10.0):
     pc = PointCloud(xyz=np.column_stack([xp, yp, zp]))
     try:
         length, area, curve, _ = measure_section(
-            pc, axis="z", position=height, thickness=8.0)
+            pc, axis=axis, position=position, thickness=thickness)
         width = float(curve[:, 0].max() - curve[:, 0].min())
         return {"width": width, "perimeter": length, "area": area,
                 "curve": curve}
@@ -172,7 +172,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
                           margin=dict(l=20, r=10, t=40, b=20))
         return fig
 
-    def compute(fB, fA, h, radius, register, cB, cA):
+    def compute(fB, fA, h, radius, register, cB, cA, sdir):
         bx, by, bz = load_align(before_path, fB, b_is_dat)
         ax, ay, az = load_align(after_path, fA, a_is_dat)
         bx, by, bz, cB = _crop(bx, by, bz, cB, radius)
@@ -185,17 +185,24 @@ def run_compare(before_path, after_path, *, frame_before=None,
         baseA = float(np.percentile(az, 10)) if len(az) else 0.0
         volB = volume_face(bx, by, bz, baseB)
         volA = volume_face(ax, ay, az, baseA)
-        # 断面は「鼻先(最も手前=高さ最大)からの深さ h mm」で指定 → 必ず顔の中
-        ref = float(bz.max()) if len(bz) else 1.0
+        # 鼻(before の最手前=高さ最大)を基準に、スライス位置を決める
+        if len(bz):
+            im = int(np.argmax(bz))
+            nx, ny = float(bx[im]), float(by[im])
+        else:
+            nx, ny = 0.0, 0.0
         if h is None:
-            h = 30.0
-        pos = ref - h
-        mB = face_metrics(bx, by, bz, height=pos)
-        mA = face_metrics(ax, ay, az, height=pos)
-        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, pos)
+            h = 0.0
+        if sdir == "vert":          # 縦スライス(左右位置 x で切る)=横顔プロフィール
+            axis, pos = "x", nx + h
+        else:                       # 横スライス(上下位置 y で切る)=左右の断面
+            axis, pos = "y", ny + h
+        mB = face_metrics(bx, by, bz, axis=axis, position=pos)
+        mA = face_metrics(ax, ay, az, axis=axis, position=pos)
+        return (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, axis)
 
     def make_outputs(state):
-        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, pos) = state
+        (bx, by, bz, ax, ay, az, mB, mA, volB, volA, h, axis) = state
         secf = go.Figure()
         if len(mB["curve"]):
             secf.add_trace(go.Scatter(x=mB["curve"][:, 0], y=mB["curve"][:, 1],
@@ -204,9 +211,14 @@ def run_compare(before_path, after_path, *, frame_before=None,
             secf.add_trace(go.Scatter(x=mA["curve"][:, 0], y=mA["curve"][:, 1],
                            mode="lines+markers", name="after", line_color="red"))
         secf.update_yaxes(scaleanchor="x", scaleratio=1)
-        secf.update_layout(
-            title=f"鼻先から {h:.0f}mm 深さの断面(青=before 赤=after)",
-            height=380, xaxis_title="左右 x'[mm]", yaxis_title="前後 y'[mm]")
+        if axis == "x":   # 縦スライス: 横顔プロフィール(上下 × 突出)
+            title = f"縦スライス(中心から{h:.0f}mm)= 横顔プロフィール"
+            xlab, ylab = "上下 [mm]", "突出(高さ)[mm]"
+        else:             # 横スライス: 左右の断面(左右 × 突出)
+            title = f"横スライス(鼻の高さから{h:.0f}mm)= 左右の断面"
+            xlab, ylab = "左右 [mm]", "突出(高さ)[mm]"
+        secf.update_layout(title=title + " 青=before 赤=after", height=380,
+                           xaxis_title=xlab, yaxis_title=ylab)
         wB, lB, dB = face_dims(bx, by, bz)
         wA, lA, dA = face_dims(ax, ay, az)
         rB = dB / wB if wB else 0.0     # 立体度(高さ÷幅)
@@ -306,8 +318,13 @@ def run_compare(before_path, after_path, *, frame_before=None,
         html.Label("顔の範囲(半径 mm)= 円の大きさ"),
         dcc.Slider(40, 250, 5, value=150, id="r",
                    tooltip={"placement": "bottom", "always_visible": True}),
-        html.Label("断面の位置=鼻先からの深さ(mm)"),
-        dcc.Slider(0, 150, 2, value=30, id="h",
+        html.Label("断面の向き"),
+        dcc.RadioItems(id="sdir", value="horiz", inline=True,
+                       options=[{"label": " 横スライス(左右の断面)", "value": "horiz"},
+                                {"label": " 縦スライス(横顔プロフィール)", "value": "vert"}],
+                       style={"fontSize": "16px"}),
+        html.Label("断面の位置(中心からのずれ mm。0=鼻の位置)"),
+        dcc.Slider(-120, 120, 2, value=0, id="h",
                    tooltip={"placement": "bottom", "always_visible": True}),
         dcc.Graph(id="sec"),
         html.Div(id="tbl"),
@@ -338,21 +355,21 @@ def run_compare(before_path, after_path, *, frame_before=None,
             Output("sec", "figure"), Output("tbl", "children"),
             Output("ver", "children")]
     ins = [Input("r", "value"), Input("h", "value"), Input("reg", "value"),
-           Input("cb", "data"), Input("ca", "data")]
+           Input("cb", "data"), Input("ca", "data"), Input("sdir", "value")]
     if b_is_dat:
         ins.append(Input("fb", "value"))
     if a_is_dat:
         ins.append(Input("fa", "value"))
 
     @app.callback(*outs, *ins)
-    def _update(r, h, reg, cb, ca, *frames):
+    def _update(r, h, reg, cb, ca, sdir, *frames):
         i = 0
         fB = frames[i] if b_is_dat else fB0
         i += 1 if b_is_dat else 0
         fA = frames[i] if a_is_dat else fA0
         cB = (float(cb[0]), float(cb[1])) if cb else (dbx, dby)
         cA = (float(ca[0]), float(ca[1])) if ca else (dax, day)
-        st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA)
+        st = compute(int(fB), int(fA), float(h), float(r), bool(reg), cB, cA, sdir)
         bxx, byy, bzz, axx, ayy, azz = (load_align(before_path, int(fB), b_is_dat)
                                         + load_align(after_path, int(fA), a_is_dat))
         gb = topfig(bxx, byy, bzz, f"before (frame {fB})", cB, float(r))
