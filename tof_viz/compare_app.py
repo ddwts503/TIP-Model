@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import glob
+import os
 import webbrowser
 from functools import lru_cache
 from typing import Optional
@@ -15,6 +17,37 @@ import numpy as np
 from .bed import compute_bed_aligned
 from .loader import PointCloud, load_points
 from .measure import measure_section
+
+
+def find_data_files(extra=()):
+    """Mac内の計測データ候補(.dat / .csv)を探す。SSD・デスクトップ等を走査。"""
+    roots = ["/Volumes",
+             os.path.expanduser("~/Desktop"),
+             os.path.expanduser("~/Downloads"),
+             os.path.expanduser("~/Documents")]
+    found = []
+    for r in roots:
+        if not os.path.isdir(r):
+            continue
+        for depth in range(1, 7):
+            stem = os.path.join(r, *(["*"] * depth))
+            for ext in ("dat", "csv"):
+                for f in glob.glob(stem + "." + ext):
+                    try:
+                        if os.path.isfile(f) and os.path.getsize(f) > 1_000_000:
+                            found.append(f)
+                    except OSError:
+                        pass
+    # 現在使用中のファイルも必ず候補に入れ、重複を除く
+    found = list(dict.fromkeys([p for p in extra if p] + found))
+
+    def _mtime(f):
+        try:
+            return os.path.getmtime(f)
+        except OSError:
+            return 0.0
+    found.sort(key=_mtime, reverse=True)
+    return found
 
 
 def _subject_mask(zp, frac=0.3):
@@ -157,6 +190,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         if a_is_dat:
             nA = toforge.count_frames(after_path)
 
+    # 実行中に差し替え可能な現在のデータ状態(ドロップダウンで変更)
+    S = {"before": before_path, "after": after_path,
+         "b_is_dat": b_is_dat, "a_is_dat": a_is_dat, "nB": nB, "nA": nA}
+
     @lru_cache(maxsize=128)
     def load_align(path, frame, is_dat, rot=0.0):
         """カメラそのままの向き(顔は正立)。人物だけ残し、鼻=手前を高さに。
@@ -217,8 +254,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     def compute(fB, fA, posB, posA, radius, register, cB, cA, sdir,
                 byaw=0.0, ayaw=0.0, broll=0.0, aroll=0.0, thick=5.0):
-        bx, by, bz = load_align(before_path, fB, b_is_dat)
-        ax, ay, az = load_align(after_path, fA, a_is_dat)
+        bx, by, bz = load_align(S["before"], fB, S["b_is_dat"])
+        ax, ay, az = load_align(S["after"], fA, S["a_is_dat"])
         # ビフォー/アフター別々に: 傾き(軸回転 roll)→ 左右向き(yaw)
         bx, by = _roll(bx, by, cB[0], cB[1], broll)
         ax, ay = _roll(ax, ay, cA[0], cA[1], aroll)
@@ -340,17 +377,15 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     app = dash.Dash(__name__)
 
-    frame_ctrls = []
-    if b_is_dat:
-        frame_ctrls += [html.Label(f"ビフォーのコマ (0〜{nB-1})"),
-                        dcc.Slider(0, nB - 1, max(1, nB // 200), value=fB0,
-                                   id="fb", tooltip={"placement": "bottom",
-                                   "always_visible": True})]
-    if a_is_dat:
-        frame_ctrls += [html.Label(f"アフターのコマ (0〜{nA-1})"),
-                        dcc.Slider(0, nA - 1, max(1, nA // 200), value=fA0,
-                                   id="fa", tooltip={"placement": "bottom",
-                                   "always_visible": True})]
+    frame_ctrls = [
+        html.Label("ビフォーのコマ", id="fblab"),
+        dcc.Slider(0, max(0, nB - 1), max(1, (nB // 200) or 1), value=fB0,
+                   id="fb", tooltip={"placement": "bottom",
+                                     "always_visible": True}),
+        html.Label("アフターのコマ", id="falab"),
+        dcc.Slider(0, max(0, nA - 1), max(1, (nA // 200) or 1), value=fA0,
+                   id="fa", tooltip={"placement": "bottom",
+                                     "always_visible": True})]
 
     def cslider(id_, lo, hi, val):
         return dcc.Slider(round(lo), round(hi), 5, value=round(val), id=id_,
@@ -358,8 +393,27 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
+    dat_opts = [{"label": f"{os.path.basename(os.path.dirname(p))}/"
+                          f"{os.path.basename(p)}", "value": p}
+                for p in find_data_files(extra=[before_path, after_path])]
+
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v19]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v20]"),
+        html.Div([
+            html.B("データの選択(別のファイルに変えられます)"),
+            html.Label("ビフォーのデータ"),
+            dcc.Dropdown(id="ddb", options=dat_opts, value=before_path,
+                         clearable=False),
+            html.Label("アフターのデータ"),
+            dcc.Dropdown(id="dda", options=dat_opts, value=after_path,
+                         clearable=False),
+            html.Button("▶ このデータで読み込む", id="loadbtn", n_clicks=0,
+                        style={"fontSize": "16px", "marginTop": "8px",
+                               "padding": "6px 14px"}),
+            html.Div(id="loadmsg", style={"marginTop": "6px",
+                                          "color": "#0a0"}),
+        ], style={"border": "2px solid #46a", "padding": "10px",
+                  "margin": "8px 0", "background": "#eef4ff"}),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
                "動かせます。左=ビフォー、右=アフター。"),
         html.Div([
@@ -500,19 +554,16 @@ def run_compare(before_path, after_path, *, frame_before=None,
            Input("sdir", "value"), Input("byaw", "value"), Input("ayaw", "value"),
            Input("broll", "value"), Input("aroll", "value"),
            Input("thick", "value"), Input("bfx", "value"), Input("bfy", "value"),
-           Input("afx", "value"), Input("afy", "value")]
-    if b_is_dat:
-        ins.append(Input("fb", "value"))
-    if a_is_dat:
-        ins.append(Input("fa", "value"))
+           Input("afx", "value"), Input("afy", "value"),
+           Input("fb", "value"), Input("fa", "value")]
 
     @app.callback(*outs, *ins)
     def _update(r, hposB, hposA, reg, cb, ca, sdir, byaw, ayaw, broll, aroll,
-                thick, bfx, bfy, afx, afy, *frames):
-        i = 0
-        fB = frames[i] if b_is_dat else fB0
-        i += 1 if b_is_dat else 0
-        fA = frames[i] if a_is_dat else fA0
+                thick, bfx, bfy, afx, afy, fB, fA):
+        fB = int(fB) if fB is not None else 0
+        fA = int(fA) if fA is not None else 0
+        fB = min(max(0, fB), max(0, S["nB"] - 1)) if S["b_is_dat"] else 0
+        fA = min(max(0, fA), max(0, S["nA"] - 1)) if S["a_is_dat"] else 0
         # 円の中心 = ドラッグ位置 + 微調整(1mm刻み)
         cB = ((float(cb[0]) if cb else dbx) + float(bfx),
               (float(cb[1]) if cb else dby) + float(bfy))
@@ -523,8 +574,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         st = compute(int(fB), int(fA), pB, pA, float(r), bool(reg), cB, cA,
                      sdir, float(byaw), float(ayaw), float(broll), float(aroll),
                      float(thick))
-        bxx, byy, bzz = load_align(before_path, int(fB), b_is_dat)
-        axx, ayy, azz = load_align(after_path, int(fA), a_is_dat)
+        bxx, byy, bzz = load_align(S["before"], int(fB), S["b_is_dat"])
+        axx, ayy, azz = load_align(S["after"], int(fA), S["a_is_dat"])
         bxx, byy = _roll(bxx, byy, cB[0], cB[1], float(broll))
         axx, ayy = _roll(axx, ayy, cA[0], cA[1], float(aroll))
         bxx, byy, bzz = _yaw(bxx, byy, bzz, cB[0], float(byaw))
@@ -539,6 +590,39 @@ def run_compare(before_path, after_path, *, frame_before=None,
                     sdir=sdir, slicepos=spa)
         secf, table, verdict = make_outputs(st)
         return gb, ga, secf, table, verdict
+
+    # ドロップダウンで選んだ別データを読み込む(コマ範囲・初期円をリセット)
+    @app.callback(
+        Output("fb", "max"), Output("fb", "value"), Output("fb", "step"),
+        Output("fa", "max"), Output("fa", "value"), Output("fa", "step"),
+        Output("cb", "data", allow_duplicate=True),
+        Output("ca", "data", allow_duplicate=True),
+        Output("hposB", "data", allow_duplicate=True),
+        Output("hposA", "data", allow_duplicate=True),
+        Output("loadmsg", "children"),
+        Input("loadbtn", "n_clicks"),
+        State("ddb", "value"), State("dda", "value"),
+        prevent_initial_call=True)
+    def _reload(n, bpath, apath):
+        if not bpath or not apath:
+            raise dash.exceptions.PreventUpdate
+        S["before"] = bpath
+        S["after"] = apath
+        S["b_is_dat"] = bpath.lower().endswith(".dat")
+        S["a_is_dat"] = apath.lower().endswith(".dat")
+        from . import toforge
+        S["nB"] = toforge.count_frames(bpath) if S["b_is_dat"] else 0
+        S["nA"] = toforge.count_frames(apath) if S["a_is_dat"] else 0
+        nb_max, na_max = max(0, S["nB"] - 1), max(0, S["nA"] - 1)
+        bx, by, bz = load_align(bpath, 0, S["b_is_dat"])
+        ax, ay, az = load_align(apath, na_max, S["a_is_dat"])
+        nbc = list(_face0(bx, by, bz))
+        nac = list(_face0(ax, ay, az))
+        msg = (f"読み込みました → ビフォー: {os.path.basename(bpath)}"
+               f" / アフター: {os.path.basename(apath)}")
+        return (nb_max, 0, max(1, (S["nB"] // 200) or 1),
+                na_max, na_max, max(1, (S["nA"] // 200) or 1),
+                nbc, nac, None, None, msg)
 
     import socket
     for p in range(port, port + 20):
