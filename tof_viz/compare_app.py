@@ -50,6 +50,21 @@ def find_data_files(extra=()):
     return found
 
 
+def scan_folder(path):
+    """指定したファイル/フォルダから .dat・.csv を集める(フォルダは再帰)。"""
+    if not path:
+        return []
+    path = os.path.expanduser(path.strip()).rstrip("/")
+    if os.path.isfile(path):
+        return [path]
+    out = []
+    if os.path.isdir(path):
+        for ext in ("dat", "csv"):
+            out += glob.glob(os.path.join(path, "**", "*." + ext),
+                             recursive=True)
+    return [f for f in out if os.path.isfile(f)]
+
+
 def _subject_mask(zp, frac=0.3):
     """ベッドより十分高い点(=体)。外れ値に強いよう 99.5%tile を上限に。"""
     if len(zp) == 0:
@@ -393,12 +408,15 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
     editcfg = {"editable": True, "edits": {"shapePosition": True}}
 
-    dat_opts = [{"label": f"{os.path.basename(os.path.dirname(p))}/"
+    def _opts(paths):
+        return [{"label": f"{os.path.basename(os.path.dirname(p))}/"
                           f"{os.path.basename(p)}", "value": p}
-                for p in find_data_files(extra=[before_path, after_path])]
+                for p in paths]
+
+    dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v20]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v21]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("ビフォーのデータ"),
@@ -412,6 +430,17 @@ def run_compare(before_path, after_path, *, frame_before=None,
                                "padding": "6px 14px"}),
             html.Div(id="loadmsg", style={"marginTop": "6px",
                                           "color": "#0a0"}),
+            html.Hr(),
+            html.Label("一覧に無いときは、SSD等のフォルダ/ファイルのパスを貼り付け"
+                       "(例: /Volumes/SSD名/フォルダ)"),
+            dcc.Input(id="pathbox", type="text", debounce=True,
+                      placeholder="/Volumes/... を貼り付け",
+                      style={"width": "70%"}),
+            html.Button("このパスから探す", id="scanbtn", n_clicks=0,
+                        style={"marginLeft": "8px"}),
+            html.Button("一覧を再スキャン", id="rescanbtn", n_clicks=0,
+                        style={"marginLeft": "8px"}),
+            html.Div(id="scanmsg", style={"marginTop": "6px", "color": "#06c"}),
         ], style={"border": "2px solid #46a", "padding": "10px",
                   "margin": "8px 0", "background": "#eef4ff"}),
         html.P("赤い円の内側をドラッグして顔へ。緑の線(スライス位置)もドラッグで"
@@ -623,6 +652,30 @@ def run_compare(before_path, after_path, *, frame_before=None,
         return (nb_max, 0, max(1, (S["nB"] // 200) or 1),
                 na_max, na_max, max(1, (S["nA"] // 200) or 1),
                 nbc, nac, None, None, msg)
+
+    # パス貼り付け or 再スキャンで、両ドロップダウンの一覧を更新
+    @app.callback(
+        Output("ddb", "options"), Output("dda", "options"),
+        Output("scanmsg", "children"),
+        Input("scanbtn", "n_clicks"), Input("rescanbtn", "n_clicks"),
+        State("pathbox", "value"),
+        prevent_initial_call=True)
+    def _scan(n_scan, n_rescan, pathstr):
+        tid = (dash.callback_context.triggered[0]["prop_id"]
+               if dash.callback_context.triggered else "")
+        paths = find_data_files(extra=[S["before"], S["after"]])
+        msg = f"自動一覧: {len(paths)} 件"
+        if tid.startswith("scanbtn"):
+            extra = scan_folder(pathstr or "")
+            if not extra:
+                msg = (f"『{pathstr}』からデータ(.dat/.csv)が見つかりません。"
+                       "パスが正しいか確認してください。")
+            else:
+                msg = f"『{pathstr}』から {len(extra)} 件見つかりました。"
+            # 指定パスの結果を先頭に
+            paths = list(dict.fromkeys(extra + paths))
+        opts = _opts(paths)
+        return opts, opts, msg
 
     import socket
     for p in range(port, port + 20):
