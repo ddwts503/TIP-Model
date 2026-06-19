@@ -215,12 +215,17 @@ def run_compare(before_path, after_path, *, frame_before=None,
 
         rot[度]だけ画面内で回転(傾き補正)。
         """
-        if is_dat:
-            from . import toforge
-            pc = toforge.read_frame(path, frame, min_depth=300.0)
-        else:
-            pc = load_points(path)
-        x, y, z = np.asarray(pc.x), np.asarray(pc.y), np.asarray(pc.z)
+        try:
+            if is_dat:
+                from . import toforge
+                pc = toforge.read_frame(path, frame, min_depth=300.0)
+            else:
+                pc = load_points(path)
+            x, y, z = np.asarray(pc.x), np.asarray(pc.y), np.asarray(pc.z)
+        except Exception:
+            # 人が写っていない/有効な点が無いコマでも落とさず空で返す
+            e = np.array([])
+            return e, e, e
         if len(z) == 0:
             return x, y, z
         znear = float(np.percentile(z, 1))       # 最も手前(鼻側)
@@ -233,8 +238,26 @@ def run_compare(before_path, after_path, *, frame_before=None,
             x, y = x * c - y * s, x * s + y * c
         return x, y, height
 
-    fB0 = frame_before if frame_before is not None else 0
-    fA0 = frame_after if frame_after is not None else (nA - 1 if a_is_dat else 0)
+    def _good_frame(path, is_dat, n, half):
+        """人がよく写っているコマを自動で選ぶ。half='first'は前半,'second'は後半。"""
+        if not is_dat or n <= 1:
+            return 0
+        if half == "first":
+            cand = np.linspace(0, max(1, n // 2), 8)
+        else:
+            cand = np.linspace(n // 2, n - 1, 8)
+        best, best_cnt = int(cand[0]), -1
+        for f in np.unique(cand.astype(int)):
+            _, _, h = load_align(path, int(f), is_dat)
+            cnt = int(_subject_mask(h).sum()) if len(h) else 0
+            if cnt > best_cnt:
+                best_cnt, best = cnt, int(f)
+        return best
+
+    fB0 = (frame_before if frame_before is not None
+           else _good_frame(before_path, b_is_dat, nB, "first"))
+    fA0 = (frame_after if frame_after is not None
+           else _good_frame(after_path, a_is_dat, nA, "second"))
 
     def topfig(xp, yp, zp, title, center, radius, sdir=None, slicepos=None):
         m = _subject_mask(zp)
@@ -265,6 +288,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         fig.update_layout(title=title, height=380, showlegend=False,
                           margin=dict(l=20, r=10, t=40, b=20))
+        if m.sum() == 0:
+            fig.add_annotation(text="このコマには人が写っていません。<br>"
+                               "コマのスライダーを動かしてください。",
+                               showarrow=False, font=dict(size=16, color="red"),
+                               xref="paper", yref="paper", x=0.5, y=0.5)
         return fig
 
     def compute(fB, fA, posB, posA, radius, register, cB, cA, sdir,
@@ -416,7 +444,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v22]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v23]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("計測データ(.dat)"),
@@ -640,13 +668,15 @@ def run_compare(before_path, after_path, *, frame_before=None,
         nfr = toforge.count_frames(path) if is_dat else 0
         S["nB"] = S["nA"] = nfr
         nb_max = na_max = max(0, nfr - 1)
-        bx, by, bz = load_align(path, 0, is_dat)
-        ax, ay, az = load_align(path, na_max, is_dat)
+        fb0 = _good_frame(path, is_dat, nfr, "first")
+        fa0 = _good_frame(path, is_dat, nfr, "second")
+        bx, by, bz = load_align(path, fb0, is_dat)
+        ax, ay, az = load_align(path, fa0, is_dat)
         nbc = list(_face0(bx, by, bz))
         nac = list(_face0(ax, ay, az))
         msg = f"読み込みました → {os.path.basename(path)}"
-        return (nb_max, 0, max(1, (S["nB"] // 200) or 1),
-                na_max, na_max, max(1, (S["nA"] // 200) or 1),
+        return (nb_max, fb0, max(1, (S["nB"] // 200) or 1),
+                na_max, fa0, max(1, (S["nA"] // 200) or 1),
                 nbc, nac, None, None, msg)
 
     # パス貼り付け or 再スキャンで、両ドロップダウンの一覧を更新
