@@ -259,7 +259,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
     fA0 = (frame_after if frame_after is not None
            else _good_frame(after_path, a_is_dat, nA, "second"))
 
-    def topfig(xp, yp, zp, title, center, radius, sdir=None, slicepos=None):
+    def topfig(xp, yp, zp, title, center, radius, sdir=None, slicepos=None,
+               zoom=False):
         m = _subject_mask(zp)
         fig = go.Figure(go.Scattergl(
             x=xp[m], y=yp[m], mode="markers",
@@ -288,6 +289,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         fig.update_layout(title=title, height=380, showlegend=False,
                           margin=dict(l=20, r=10, t=40, b=20))
+        if zoom:                       # 顔を中心に拡大表示
+            pad = radius * 1.8
+            fig.update_xaxes(range=[cx - pad, cx + pad])
+            fig.update_yaxes(range=[cy - pad, cy + pad])
         if m.sum() == 0:
             fig.add_annotation(text="このコマには人が写っていません。<br>"
                                "コマのスライダーを動かしてください。",
@@ -434,7 +439,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
         return dcc.Slider(round(lo), round(hi), 5, value=round(val), id=id_,
                           tooltip={"placement": "bottom", "always_visible": True})
 
-    editcfg = {"editable": True, "edits": {"shapePosition": True}}
+    editcfg = {"editable": True, "edits": {"shapePosition": True},
+               "scrollZoom": True}
 
     def _opts(paths):
         return [{"label": f"{os.path.basename(os.path.dirname(p))}/"
@@ -444,7 +450,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v23]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v24]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("計測データ(.dat)"),
@@ -519,6 +525,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
         dcc.Slider(30, 300, 1, value=85, id="r",
                    marks={30: "30", 100: "100", 200: "200", 300: "300"},
                    tooltip={"placement": "bottom", "always_visible": True}),
+        dcc.Checklist(id="zoomface",
+                      options=[{"label": "  🔍 顔をアップで表示(円のまわりを拡大)",
+                                "value": "on"}],
+                      value=[], style={"fontSize": "16px"}),
         html.Label("断面の向き(切り替えるとスライス線の位置はリセット)"),
         dcc.RadioItems(id="sdir", value="horiz", inline=True,
                        options=[{"label": " 横スライス(左右の断面)", "value": "horiz"},
@@ -549,14 +559,23 @@ def run_compare(before_path, after_path, *, frame_before=None,
         return fallback
 
     @app.callback(Output("cb", "data"), Input("gb", "relayoutData"),
-                  State("cb", "data"), prevent_initial_call=True)
-    def _cb(rl, cur):
-        return _from_relayout(rl, cur)
+                  State("cb", "data"), State("bfx", "value"),
+                  State("bfy", "value"), prevent_initial_call=True)
+    def _cb(rl, cur, bfx, bfy):
+        c = _from_relayout(rl, None)
+        if c is None:
+            return cur
+        # 表示中心 = 保存中心 + 微調整。ドラッグ後も二重加算でズレないよう微調整を引く
+        return [c[0] - float(bfx or 0), c[1] - float(bfy or 0)]
 
     @app.callback(Output("ca", "data"), Input("ga", "relayoutData"),
-                  State("ca", "data"), prevent_initial_call=True)
-    def _ca(rl, cur):
-        return _from_relayout(rl, cur)
+                  State("ca", "data"), State("afx", "value"),
+                  State("afy", "value"), prevent_initial_call=True)
+    def _ca(rl, cur, afx, afy):
+        c = _from_relayout(rl, None)
+        if c is None:
+            return cur
+        return [c[0] - float(afx or 0), c[1] - float(afy or 0)]
 
     def _line_pos(rl, sdir):
         if not rl:
@@ -609,11 +628,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
            Input("broll", "value"), Input("aroll", "value"),
            Input("thick", "value"), Input("bfx", "value"), Input("bfy", "value"),
            Input("afx", "value"), Input("afy", "value"),
+           Input("zoomface", "value"),
            Input("fb", "value"), Input("fa", "value")]
 
     @app.callback(*outs, *ins)
     def _update(r, hposB, hposA, reg, cb, ca, sdir, byaw, ayaw, broll, aroll,
-                thick, bfx, bfy, afx, afy, fB, fA):
+                thick, bfx, bfy, afx, afy, zoomface, fB, fA):
         fB = int(fB) if fB is not None else 0
         fA = int(fA) if fA is not None else 0
         fB = min(max(0, fB), max(0, S["nB"] - 1)) if S["b_is_dat"] else 0
@@ -638,10 +658,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
         ci = 0 if sdir == "vert" else 1
         spb = pB if pB is not None else cB[ci]
         spa = pA if pA is not None else cA[ci]
+        zoom = bool(zoomface)
         gb = topfig(bxx, byy, bzz, f"ビフォー (コマ {fB})", cB, float(r),
-                    sdir=sdir, slicepos=spb)
+                    sdir=sdir, slicepos=spb, zoom=zoom)
         ga = topfig(axx, ayy, azz, f"アフター (コマ {fA})", cA, float(r),
-                    sdir=sdir, slicepos=spa)
+                    sdir=sdir, slicepos=spa, zoom=zoom)
         secf, table, verdict = make_outputs(st)
         return gb, ga, secf, table, verdict
 
