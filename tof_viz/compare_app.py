@@ -416,14 +416,11 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v21]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v22]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
-            html.Label("ビフォーのデータ"),
-            dcc.Dropdown(id="ddb", options=dat_opts, value=before_path,
-                         clearable=False),
-            html.Label("アフターのデータ"),
-            dcc.Dropdown(id="dda", options=dat_opts, value=after_path,
+            html.Label("計測データ(.dat)"),
+            dcc.Dropdown(id="dd", options=dat_opts, value=before_path,
                          clearable=False),
             html.Button("▶ このデータで読み込む", id="loadbtn", n_clicks=0,
                         style={"fontSize": "16px", "marginTop": "8px",
@@ -630,32 +627,31 @@ def run_compare(before_path, after_path, *, frame_before=None,
         Output("hposA", "data", allow_duplicate=True),
         Output("loadmsg", "children"),
         Input("loadbtn", "n_clicks"),
-        State("ddb", "value"), State("dda", "value"),
+        State("dd", "value"),
         prevent_initial_call=True)
-    def _reload(n, bpath, apath):
-        if not bpath or not apath:
+    def _reload(n, path):
+        if not path:
             raise dash.exceptions.PreventUpdate
-        S["before"] = bpath
-        S["after"] = apath
-        S["b_is_dat"] = bpath.lower().endswith(".dat")
-        S["a_is_dat"] = apath.lower().endswith(".dat")
+        # 同じ録画をビフォー・アフター両方に使う(コマで前後を選ぶ)
+        S["before"] = S["after"] = path
+        is_dat = path.lower().endswith(".dat")
+        S["b_is_dat"] = S["a_is_dat"] = is_dat
         from . import toforge
-        S["nB"] = toforge.count_frames(bpath) if S["b_is_dat"] else 0
-        S["nA"] = toforge.count_frames(apath) if S["a_is_dat"] else 0
-        nb_max, na_max = max(0, S["nB"] - 1), max(0, S["nA"] - 1)
-        bx, by, bz = load_align(bpath, 0, S["b_is_dat"])
-        ax, ay, az = load_align(apath, na_max, S["a_is_dat"])
+        nfr = toforge.count_frames(path) if is_dat else 0
+        S["nB"] = S["nA"] = nfr
+        nb_max = na_max = max(0, nfr - 1)
+        bx, by, bz = load_align(path, 0, is_dat)
+        ax, ay, az = load_align(path, na_max, is_dat)
         nbc = list(_face0(bx, by, bz))
         nac = list(_face0(ax, ay, az))
-        msg = (f"読み込みました → ビフォー: {os.path.basename(bpath)}"
-               f" / アフター: {os.path.basename(apath)}")
+        msg = f"読み込みました → {os.path.basename(path)}"
         return (nb_max, 0, max(1, (S["nB"] // 200) or 1),
                 na_max, na_max, max(1, (S["nA"] // 200) or 1),
                 nbc, nac, None, None, msg)
 
     # パス貼り付け or 再スキャンで、両ドロップダウンの一覧を更新
     @app.callback(
-        Output("ddb", "options"), Output("dda", "options"),
+        Output("dd", "options"),
         Output("scanmsg", "children"),
         Input("scanbtn", "n_clicks"), Input("rescanbtn", "n_clicks"),
         State("pathbox", "value"),
@@ -674,8 +670,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
                 msg = f"『{pathstr}』から {len(extra)} 件見つかりました。"
             # 指定パスの結果を先頭に
             paths = list(dict.fromkeys(extra + paths))
-        opts = _opts(paths)
-        return opts, opts, msg
+        return _opts(paths), msg
 
     import socket
     for p in range(port, port + 20):
