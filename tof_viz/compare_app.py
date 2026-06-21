@@ -450,7 +450,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v24]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v25]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("計測データ(.dat)"),
@@ -730,13 +730,28 @@ def run_compare(before_path, after_path, *, frame_before=None,
                 port = p
                 break
     url = f"http://127.0.0.1:{port}"
-    print(f"[compare] ブラウザで比較画面を開きます: {url}")
+
+    # 同じWi-Fi上のiPhone等から開けるよう、このMacのLAN IPも表示する
+    lan_ip = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))           # 外部に出る経路のIP(送信はしない)
+        lan_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        lan_ip = None
+
+    print(f"[compare] このMacで開く: {url}")
+    if lan_ip and not lan_ip.startswith("127."):
+        print(f"[compare] iPhone/iPadで開く(同じWi-Fi): "
+              f"http://{lan_ip}:{port}")
+        print("  ↑この住所をiPhoneのSafariのアドレス欄に入れてください。")
     print("  顔をクリックして範囲を合わせてください。終了: Control+C")
     try:
         webbrowser.open(url)
     except Exception:
         pass
     try:
-        app.run(port=port, debug=False)
+        app.run(host="0.0.0.0", port=port, debug=False)
     except AttributeError:
-        app.run_server(port=port, debug=False)
+        app.run_server(host="0.0.0.0", port=port, debug=False)
