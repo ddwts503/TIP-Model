@@ -13,7 +13,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from .compare_app import find_data_files, scan_folder
+from .compare_app import data_label, find_data_files, scan_folder
 from .loader import load_points
 
 
@@ -67,14 +67,12 @@ def run_view3d(path, *, frame=None, port=8060):
     app = dash.Dash(__name__)
 
     def _opts(paths):
-        return [{"label": f"{os.path.basename(os.path.dirname(p))}/"
-                          f"{os.path.basename(p)}", "value": p}
-                for p in paths]
+        return [{"label": data_label(p), "value": p} for p in paths]
 
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v3]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v4]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("計測データ(.dat / .csv)"),

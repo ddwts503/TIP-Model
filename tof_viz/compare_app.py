@@ -85,6 +85,19 @@ def find_data_files(extra=(), *, deep=False):
     return files
 
 
+def data_label(p):
+    """ドロップダウンの表示名。どのSSD(ボリューム)かが分かる形にする。"""
+    name = os.path.basename(p)
+    parent = os.path.basename(os.path.dirname(p))
+    parts = p.split(os.sep)
+    if len(parts) >= 3 and parts[1] == "Volumes":
+        vol = parts[2]                       # SSD(ボリューム)名
+        if parent and parent != vol:
+            return f"🟦 {vol} ▸ {parent}/{name}"
+        return f"🟦 {vol} ▸ {name}"
+    return f"💻 Mac本体 ▸ {parent}/{name}"
+
+
 def scan_folder(path):
     """指定したファイル/フォルダから .dat・.csv を集める(フォルダは再帰)。"""
     if not path:
@@ -478,14 +491,12 @@ def run_compare(before_path, after_path, *, frame_before=None,
                "scrollZoom": True}
 
     def _opts(paths):
-        return [{"label": f"{os.path.basename(os.path.dirname(p))}/"
-                          f"{os.path.basename(p)}", "value": p}
-                for p in paths]
+        return [{"label": data_label(p), "value": p} for p in paths]
 
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v27]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v28]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("計測データ(.dat)"),
