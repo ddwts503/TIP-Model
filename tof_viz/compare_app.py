@@ -21,33 +21,44 @@ from .measure import measure_section
 
 def find_data_files(extra=()):
     """Mac内の計測データ候補(.dat / .csv)を探す。SSD・デスクトップ等を走査。"""
-    roots = ["/Volumes",
-             os.path.expanduser("~/Desktop"),
-             os.path.expanduser("~/Downloads"),
-             os.path.expanduser("~/Documents")]
     found = []
-    for r in roots:
+    # SSD等(/Volumes)は深さに関係なく確実に拾う(再帰)
+    if os.path.isdir("/Volumes"):
+        for ext in ("dat", "csv"):
+            try:
+                found += glob.glob(os.path.join("/Volumes", "**", "*." + ext),
+                                   recursive=True)
+            except OSError:
+                pass
+    # ホーム配下は重くならないよう浅めに(深さ1〜4)
+    home_roots = [os.path.expanduser("~/Desktop"),
+                  os.path.expanduser("~/Downloads"),
+                  os.path.expanduser("~/Documents")]
+    for r in home_roots:
         if not os.path.isdir(r):
             continue
-        for depth in range(1, 7):
+        for depth in range(1, 5):
             stem = os.path.join(r, *(["*"] * depth))
             for ext in ("dat", "csv"):
-                for f in glob.glob(stem + "." + ext):
-                    try:
-                        if os.path.isfile(f) and os.path.getsize(f) > 1_000_000:
-                            found.append(f)
-                    except OSError:
-                        pass
+                found += glob.glob(stem + "." + ext)
+    # ファイルのみ・小さすぎるものは除外
+    files = []
+    for f in found:
+        try:
+            if os.path.isfile(f) and os.path.getsize(f) > 1_000_000:
+                files.append(f)
+        except OSError:
+            pass
     # 現在使用中のファイルも必ず候補に入れ、重複を除く
-    found = list(dict.fromkeys([p for p in extra if p] + found))
+    files = list(dict.fromkeys([p for p in extra if p] + files))
 
     def _mtime(f):
         try:
             return os.path.getmtime(f)
         except OSError:
             return 0.0
-    found.sort(key=_mtime, reverse=True)
-    return found
+    files.sort(key=_mtime, reverse=True)
+    return files
 
 
 def scan_folder(path):
@@ -450,7 +461,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v25]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v26]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("計測データ(.dat)"),
