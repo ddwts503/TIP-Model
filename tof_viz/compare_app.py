@@ -509,7 +509,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v29]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v30]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -524,8 +524,10 @@ def run_compare(before_path, after_path, *, frame_before=None,
             html.Button("▶ このデータで読み込む", id="loadbtn", n_clicks=0,
                         style={"fontSize": "16px", "marginTop": "8px",
                                "padding": "6px 14px"}),
-            html.Div(id="loadmsg", style={"marginTop": "6px",
-                                          "color": "#0a0"}),
+            html.Div(id="loadmsg",
+                     children="現在のデータ: " + data_label(before_path),
+                     style={"marginTop": "8px", "fontSize": "17px",
+                            "fontWeight": "bold", "color": "#063"}),
             html.Hr(),
             html.Label("一覧に無いときは、SSD等のフォルダ/ファイルのパスを貼り付け"
                        "(例: /Volumes/SSD名/フォルダ)"),
@@ -760,7 +762,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
         ax, ay, az = load_align(path, fa0, is_dat)
         nbc = list(_face0(bx, by, bz))
         nac = list(_face0(ax, ay, az))
-        msg = f"読み込みました → {os.path.basename(path)}"
+        msg = "現在のデータ: " + data_label(path)
         return (nb_max, fb0, max(1, (S["nB"] // 200) or 1),
                 na_max, fa0, max(1, (S["nA"] // 200) or 1),
                 nbc, nac, None, None, msg)

@@ -73,7 +73,7 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v5]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v6]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -88,7 +88,10 @@ def run_view3d(path, *, frame=None, port=8060):
             html.Button("▶ このデータを表示", id="loadbtn", n_clicks=0,
                         style={"fontSize": "16px", "marginTop": "8px",
                                "padding": "6px 14px"}),
-            html.Div(id="loadmsg", style={"marginTop": "6px", "color": "#0a0"}),
+            html.Div(id="loadmsg",
+                     children="現在のデータ: " + data_label(path),
+                     style={"marginTop": "8px", "fontSize": "17px",
+                            "fontWeight": "bold", "color": "#063"}),
             html.Hr(),
             html.Label("一覧に無いときは、SSD等のフォルダ/ファイルのパスを貼り付け"
                        "(例: /Volumes/SSD名/フォルダ)"),
@@ -142,7 +145,7 @@ def run_view3d(path, *, frame=None, port=8060):
         S["n"] = toforge.count_frames(p) if S["is_dat"] else 0
         nmax = max(0, S["n"] - 1)
         return (nmax, min(nmax, S["n"] // 2), max(1, (S["n"] // 200) or 1),
-                f"表示中 → {os.path.basename(p)}")
+                "現在のデータ: " + data_label(p))
 
     @app.callback(
         Output("dd", "options", allow_duplicate=True),
