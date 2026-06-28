@@ -85,6 +85,19 @@ def find_data_files(extra=(), *, deep=False):
     return files
 
 
+def list_volumes():
+    """マウント中のSSD等(/Volumes 配下のドライブ)のパス一覧。"""
+    out = []
+    try:
+        for d in sorted(os.listdir("/Volumes")):
+            p = os.path.join("/Volumes", d)
+            if os.path.isdir(p) and not d.startswith("."):
+                out.append(p)
+    except OSError:
+        pass
+    return out
+
+
 def data_label(p):
     """ドロップダウンの表示名。どのSSD(ボリューム)かが分かる形にする。"""
     name = os.path.basename(p)
@@ -496,10 +509,16 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v28]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v29]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
-            html.Label("計測データ(.dat)"),
+            html.Label("① SSD(ドライブ)を選ぶ"),
+            dcc.Dropdown(id="vol",
+                         options=[{"label": "🟦 " + os.path.basename(p),
+                                   "value": p} for p in list_volumes()],
+                         placeholder="つないでいるSSDを選ぶと、中のデータが下に出ます",
+                         clearable=False),
+            html.Label("② 計測データ(.dat)を選ぶ"),
             dcc.Dropdown(id="dd", options=dat_opts, value=before_path,
                          clearable=False),
             html.Button("▶ このデータで読み込む", id="loadbtn", n_clicks=0,
@@ -746,7 +765,30 @@ def run_compare(before_path, after_path, *, frame_before=None,
                 na_max, fa0, max(1, (S["nA"] // 200) or 1),
                 nbc, nac, None, None, msg)
 
-    # パス貼り付け or 再スキャンで、両ドロップダウンの一覧を更新
+    # ①SSDを選ぶ → その中のデータを一覧にして②に出す(確実に選べる)
+    @app.callback(
+        Output("dd", "options", allow_duplicate=True),
+        Output("dd", "value", allow_duplicate=True),
+        Output("scanmsg", "children", allow_duplicate=True),
+        Input("vol", "value"), prevent_initial_call=True)
+    def _pickvol(volpath):
+        if not volpath:
+            raise dash.exceptions.PreventUpdate
+        files = scan_folder(volpath)
+
+        def _mt(f):
+            try:
+                return os.path.getmtime(f)
+            except OSError:
+                return 0.0
+        files.sort(key=_mt, reverse=True)
+        nm = os.path.basename(volpath)
+        if not files:
+            return [], None, f"『{nm}』にデータ(.dat/.csv)が見つかりません。"
+        return (_opts(files), files[0],
+                f"『{nm}』から {len(files)} 件。②でデータを選んでください。")
+
+    # パス貼り付け or 再スキャンで、データ一覧を更新
     @app.callback(
         Output("dd", "options"),
         Output("scanmsg", "children"),

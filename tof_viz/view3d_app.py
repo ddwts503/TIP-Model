@@ -13,7 +13,8 @@ from functools import lru_cache
 
 import numpy as np
 
-from .compare_app import data_label, find_data_files, scan_folder
+from .compare_app import (
+    data_label, find_data_files, list_volumes, scan_folder)
 from .loader import load_points
 
 
@@ -72,10 +73,16 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v4]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v5]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
-            html.Label("計測データ(.dat / .csv)"),
+            html.Label("① SSD(ドライブ)を選ぶ"),
+            dcc.Dropdown(id="vol",
+                         options=[{"label": "🟦 " + os.path.basename(p),
+                                   "value": p} for p in list_volumes()],
+                         placeholder="つないでいるSSDを選ぶと、中のデータが下に出ます",
+                         clearable=False),
+            html.Label("② 計測データ(.dat / .csv)を選ぶ"),
             dcc.Dropdown(id="dd", options=dat_opts, value=path,
                          clearable=False),
             html.Button("▶ このデータを表示", id="loadbtn", n_clicks=0,
@@ -136,6 +143,28 @@ def run_view3d(path, *, frame=None, port=8060):
         nmax = max(0, S["n"] - 1)
         return (nmax, min(nmax, S["n"] // 2), max(1, (S["n"] // 200) or 1),
                 f"表示中 → {os.path.basename(p)}")
+
+    @app.callback(
+        Output("dd", "options", allow_duplicate=True),
+        Output("dd", "value", allow_duplicate=True),
+        Output("scanmsg", "children", allow_duplicate=True),
+        Input("vol", "value"), prevent_initial_call=True)
+    def _pickvol(volpath):
+        if not volpath:
+            raise dash.exceptions.PreventUpdate
+        files = scan_folder(volpath)
+
+        def _mt(f):
+            try:
+                return os.path.getmtime(f)
+            except OSError:
+                return 0.0
+        files.sort(key=_mt, reverse=True)
+        nm = os.path.basename(volpath)
+        if not files:
+            return [], None, f"『{nm}』にデータ(.dat/.csv)が見つかりません。"
+        return (_opts(files), files[0],
+                f"『{nm}』から {len(files)} 件。②でデータを選んでください。")
 
     @app.callback(
         Output("dd", "options"), Output("scanmsg", "children"),
