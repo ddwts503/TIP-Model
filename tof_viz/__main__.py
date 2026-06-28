@@ -63,9 +63,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=["3d", "slice", "grid", "interactive", "browse", "contact",
                  "oblique", "reference", "measure", "front", "bed", "adjust",
-                 "compare"],
+                 "compare", "view3d"],
         default="3d",
         help="表示モード。compare=ビフォー/アフター小顔チェック(ブラウザ), "
+             "view3d=3Dビューア(ブラウザ・どのSSDからでも), "
              "bed=ベッド基準化, adjust=矢状面の対話調整",
     )
     p.add_argument("--axis", choices=["x", "y", "z"], default="z",
@@ -156,6 +157,11 @@ def main(argv=None) -> int:
         run_compare(path, after_path,
                     frame_before=args.frame_before or args.frame,
                     frame_after=args.frame_after)
+        return 0
+
+    if args.mode == "view3d":
+        from .view3d_app import run_view3d
+        run_view3d(path, frame=args.frame)
         return 0
 
     if _is_dat(path):
