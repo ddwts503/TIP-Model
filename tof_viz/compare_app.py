@@ -19,38 +19,62 @@ from .loader import PointCloud, load_points
 from .measure import measure_section
 
 
-def find_data_files(extra=()):
-    """Mac内の計測データ候補(.dat / .csv)を探す。SSD・デスクトップ等を走査。"""
+DATA_EXTS = (".dat", ".csv")
+
+
+def _walk_collect(root, *, maxdepth=None, min_size=1_000_000):
+    """root配下の .dat/.csv を集める(大文字小文字を区別しない・エラーに強い)。"""
+    out = []
+    root = root.rstrip("/")
+    if not os.path.isdir(root):
+        return out
+    base = root.count(os.sep)
+    for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: None):
+        # 隠し/システムフォルダ(.Spotlight等やTime Machine)は除外
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d != "Backups.backupdb"]
+        if maxdepth is not None and (dirpath.count(os.sep) - base) >= maxdepth:
+            dirnames[:] = []
+        for fn in filenames:
+            if fn.startswith("."):
+                continue
+            if fn.lower().endswith(DATA_EXTS):
+                p = os.path.join(dirpath, fn)
+                try:
+                    if os.path.isfile(p) and os.path.getsize(p) >= min_size:
+                        out.append(p)
+                except OSError:
+                    pass
+    return out
+
+
+def find_data_files(extra=(), *, deep=False):
+    """Mac内の計測データ候補(.dat / .csv)を探す。SSD・デスクトップ等を走査。
+
+    deep=False(既定)は浅め(深さ3)で高速=起動時用。deep=True は奥まで
+    くまなく(時間がかかる)=「再スキャン」用。
+    """
     found = []
-    # SSD等(/Volumes)は深さに関係なく確実に拾う(再帰)
-    if os.path.isdir("/Volumes"):
-        for ext in ("dat", "csv"):
-            try:
-                found += glob.glob(os.path.join("/Volumes", "**", "*." + ext),
-                                   recursive=True)
-            except OSError:
-                pass
-    # ホーム配下は重くならないよう浅めに(深さ1〜4)
-    home_roots = [os.path.expanduser("~/Desktop"),
-                  os.path.expanduser("~/Downloads"),
-                  os.path.expanduser("~/Documents")]
-    for r in home_roots:
-        if not os.path.isdir(r):
-            continue
-        for depth in range(1, 5):
-            stem = os.path.join(r, *(["*"] * depth))
-            for ext in ("dat", "csv"):
-                found += glob.glob(stem + "." + ext)
-    # ファイルのみ・小さすぎるものは除外
-    files = []
-    for f in found:
+    # /Volumes 配下の各SSDを個別に走査(1台がエラーでも他は拾える)
+    vol = "/Volumes"
+    vdepth = None if deep else 3
+    if os.path.isdir(vol):
         try:
-            if os.path.isfile(f) and os.path.getsize(f) > 1_000_000:
-                files.append(f)
+            entries = [os.path.join(vol, d) for d in os.listdir(vol)]
         except OSError:
-            pass
+            entries = []
+        for d in entries:
+            try:
+                found += _walk_collect(d, maxdepth=vdepth)
+            except Exception:
+                pass
+    # ホーム配下は重くならないよう浅めに(深さ4まで)
+    for r in (os.path.expanduser("~/Desktop"),
+              os.path.expanduser("~/Downloads"),
+              os.path.expanduser("~/Documents")):
+        found += _walk_collect(r, maxdepth=4)
     # 現在使用中のファイルも必ず候補に入れ、重複を除く
-    files = list(dict.fromkeys([p for p in extra if p] + files))
+    files = list(dict.fromkeys([p for p in extra if p] + found))
 
     def _mtime(f):
         try:
@@ -461,7 +485,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v26]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v27]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("計測データ(.dat)"),
@@ -721,7 +745,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
     def _scan(n_scan, n_rescan, pathstr):
         tid = (dash.callback_context.triggered[0]["prop_id"]
                if dash.callback_context.triggered else "")
-        paths = find_data_files(extra=[S["before"], S["after"]])
+        deep = tid.startswith("rescanbtn")
+        paths = find_data_files(extra=[S["before"], S["after"]], deep=deep)
         msg = f"自動一覧: {len(paths)} 件"
         if tid.startswith("scanbtn"):
             extra = scan_folder(pathstr or "")

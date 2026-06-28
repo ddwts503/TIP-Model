@@ -74,7 +74,7 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v2]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v3]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("計測データ(.dat / .csv)"),
@@ -121,7 +121,7 @@ def run_view3d(path, *, frame=None, port=8060):
         if S["is_dat"]:
             fr = min(max(0, fr), max(0, S["n"] - 1))
         md = None if (maxd is None or maxd >= 4000) else float(maxd)
-        pc = load(S["path"], fr, S["is_dat"], md, 60000)
+        pc = load(S["path"], fr, S["is_dat"], md, 40000)
         return fig3d(pc, int(psz))
 
     @app.callback(
@@ -146,7 +146,8 @@ def run_view3d(path, *, frame=None, port=8060):
     def _scan(n_scan, n_rescan, pathstr):
         tid = (dash.callback_context.triggered[0]["prop_id"]
                if dash.callback_context.triggered else "")
-        paths = find_data_files(extra=[S["path"]])
+        deep = tid.startswith("rescanbtn")
+        paths = find_data_files(extra=[S["path"]], deep=deep)
         msg = f"自動一覧: {len(paths)} 件"
         if tid.startswith("scanbtn"):
             extra = scan_folder(pathstr or "")
