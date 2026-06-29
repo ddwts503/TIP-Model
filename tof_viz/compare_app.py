@@ -99,16 +99,20 @@ def list_volumes():
 
 
 def data_label(p):
-    """ドロップダウンの表示名。どのSSD(ボリューム)かが分かる形にする。"""
+    """ドロップダウンの表示名。先頭に【SSD名】、末尾にサイズを出して見分けやすく。"""
     name = os.path.basename(p)
-    parent = os.path.basename(os.path.dirname(p))
     parts = p.split(os.sep)
     if len(parts) >= 3 and parts[1] == "Volumes":
         vol = parts[2]                       # SSD(ボリューム)名
-        if parent and parent != vol:
-            return f"🟦 {vol} ▸ {parent}/{name}"
-        return f"🟦 {vol} ▸ {name}"
-    return f"💻 Mac本体 ▸ {parent}/{name}"
+        head = f"🟦【{vol}】"
+    else:
+        head = "💻【Mac本体】"
+    try:
+        gb = os.path.getsize(p) / 1e9
+        size = f"  ・{gb:.1f}GB"
+    except OSError:
+        size = ""
+    return f"{head} {name}{size}"
 
 
 def scan_folder(path):
@@ -509,7 +513,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v30]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v31]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("① SSD(ドライブ)を選ぶ"),

@@ -73,7 +73,7 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v6]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v7]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
