@@ -58,7 +58,62 @@ def run_view3d(path, *, frame=None, port=8060):
                 xyz, inten = xyz[m], inten[m]
         return xyz, inten
 
-    def fig3d(pc, ptsize, colorby="z"):
+    def _box(rangeon, rx, ry, rz):
+        if not rangeon or "on" not in rangeon:
+            return None
+        return {"x": rx, "y": ry, "z": rz}
+
+    def _apply_box(xyz, inten, box):
+        if not box:
+            return xyz, inten
+        m = ((xyz[:, 0] >= box["x"][0]) & (xyz[:, 0] <= box["x"][1]) &
+             (xyz[:, 1] >= box["y"][0]) & (xyz[:, 1] <= box["y"][1]) &
+             (xyz[:, 2] >= box["z"][0]) & (xyz[:, 2] <= box["z"][1]))
+        if int(m.sum()) == 0:
+            return xyz, inten              # 空になるなら無視(全体を表示)
+        return xyz[m], inten[m]
+
+    def _make_gif(xyz, inten, colorby):
+        """点群を1回転させた回転GIF(base64)を作る。"""
+        import base64
+        import tempfile
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.animation import FuncAnimation, PillowWriter
+        if len(xyz) > 9000:
+            idx = np.random.default_rng(0).choice(len(xyz), 9000, replace=False)
+            xyz, inten = xyz[idx], inten[idx]
+        c = inten if colorby == "ir" else xyz[:, 2]
+        cmap = "gray" if colorby == "ir" else "turbo"
+        fig = plt.figure(figsize=(5, 5))
+        ax = fig.add_subplot(111, projection="3d")
+        ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], c=c, cmap=cmap, s=2)
+        try:
+            ax.set_box_aspect((np.ptp(xyz[:, 0]) + 1, np.ptp(xyz[:, 1]) + 1,
+                               np.ptp(xyz[:, 2]) + 1))
+        except Exception:
+            pass
+        ax.set_axis_off()
+
+        def upd(a):
+            ax.view_init(elev=20, azim=a)
+        anim = FuncAnimation(fig, upd, frames=range(0, 360, 20))
+        tmp = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
+        tmp.close()
+        try:
+            anim.save(tmp.name, writer=PillowWriter(fps=8))
+            with open(tmp.name, "rb") as f:
+                data = f.read()
+        finally:
+            plt.close(fig)
+            try:
+                os.remove(tmp.name)
+            except OSError:
+                pass
+        return base64.b64encode(data).decode()
+
+    def fig3d(pc, ptsize, colorby="z", box=None):
         fig = go.Figure()
         if pc is None or len(pc.xyz) == 0:
             fig.add_annotation(text="このコマには表示できる点がありません。<br>"
@@ -68,6 +123,7 @@ def run_view3d(path, *, frame=None, port=8060):
             fig.update_layout(height=480)
             return fig
         xyz, inten = _clip(pc)
+        xyz, inten = _apply_box(xyz, inten, box)
         if colorby == "ir":          # 明るさ(IR)=実写ふう
             col, cs = inten, "Gray"
         else:                         # 距離(高さ)=色分け
@@ -99,8 +155,22 @@ def run_view3d(path, *, frame=None, port=8060):
 
     dat_opts = _opts(find_data_files(extra=[path]))
 
+    # 範囲選択スライダーの上下限は、最初のコマの人の広がりから決める
+    _seed = load(path, fr0, is_dat, 1500.0, 40000)
+    if _seed is not None and len(_seed.xyz):
+        _sx, _ = _clip(_seed)
+        ext = {ax: (round(float(_sx[:, j].min())), round(float(_sx[:, j].max())))
+               for j, ax in ((0, "x"), (1, "y"), (2, "z"))}
+    else:
+        ext = {"x": (-1000, 1000), "y": (-1000, 1000), "z": (0, 2000)}
+
+    def _rslider(id_, lo, hi):
+        return dcc.RangeSlider(lo, hi, max(1, (hi - lo) // 100), value=[lo, hi],
+                               id=id_, tooltip={"placement": "bottom",
+                                                "always_visible": True})
+
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v12]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v14]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -153,9 +223,26 @@ def run_view3d(path, *, frame=None, port=8060):
                                   "marginRight": "16px"}),
             html.Button("↺ 視点リセット", id="resetbtn", n_clicks=0,
                         style={"marginRight": "8px"}),
-            html.Button("⬇ CSV書き出し", id="csvbtn", n_clicks=0),
+            html.Button("⬇ CSV書き出し", id="csvbtn", n_clicks=0,
+                        style={"marginRight": "8px"}),
+            html.Button("🎥 録画(回転GIF)", id="recbtn", n_clicks=0),
             dcc.Download(id="dl"),
+            html.Span(id="recmsg", style={"marginLeft": "10px",
+                                          "color": "#06c"}),
         ], style={"margin": "8px 0"}),
+        html.Div([
+            dcc.Checklist(id="rangeon",
+                          options=[{"label": " 範囲選択(一部だけ表示・保存)",
+                                    "value": "on"}], value=[],
+                          style={"fontWeight": "bold"}),
+            html.Label("左右 X (mm)"),
+            _rslider("rx", ext["x"][0], ext["x"][1]),
+            html.Label("上下 Y (mm)"),
+            _rslider("ry", ext["y"][0], ext["y"][1]),
+            html.Label("距離 Z (mm)"),
+            _rslider("rz", ext["z"][0], ext["z"][1]),
+        ], style={"border": "1px solid #ccc", "padding": "8px",
+                  "margin": "8px 0"}),
         dcc.Graph(id="g3d", config={"scrollZoom": False}),
         html.P("マウスでドラッグ=回転。拡大縮小はトラックパッドのピンチ、または"
                "右上の拡大ボタン。ページは普通にスクロールできます。"
@@ -165,19 +252,23 @@ def run_view3d(path, *, frame=None, port=8060):
     @app.callback(Output("g3d", "figure"),
                   Input("fr", "value"), Input("maxd", "value"),
                   Input("psz", "value"), Input("colorby", "value"),
-                  Input("resetbtn", "n_clicks"))
-    def _update(fr, maxd, psz, colorby, reset):
+                  Input("resetbtn", "n_clicks"), Input("rangeon", "value"),
+                  Input("rx", "value"), Input("ry", "value"),
+                  Input("rz", "value"))
+    def _update(fr, maxd, psz, colorby, reset, rangeon, rx, ry, rz):
         fr = int(fr) if fr is not None else 0
         if S["is_dat"]:
             fr = min(max(0, fr), max(0, S["n"] - 1))
         md = None if (maxd is None or maxd >= 4000) else float(maxd)
         pc = load(S["path"], fr, S["is_dat"], md, 40000)
-        return fig3d(pc, int(psz), colorby or "z")
+        return fig3d(pc, int(psz), colorby or "z", _box(rangeon, rx, ry, rz))
 
     @app.callback(Output("dl", "data"), Input("csvbtn", "n_clicks"),
                   State("fr", "value"), State("maxd", "value"),
+                  State("rangeon", "value"), State("rx", "value"),
+                  State("ry", "value"), State("rz", "value"),
                   prevent_initial_call=True)
-    def _csv(nclk, fr, maxd):
+    def _csv(nclk, fr, maxd, rangeon, rx, ry, rz):
         import io
         fr = int(fr) if fr is not None else 0
         if S["is_dat"]:
@@ -187,12 +278,38 @@ def run_view3d(path, *, frame=None, port=8060):
         if pc is None or len(pc.xyz) == 0:
             raise dash.exceptions.PreventUpdate
         xyz, inten = _clip(pc)
+        xyz, inten = _apply_box(xyz, inten, _box(rangeon, rx, ry, rz))
         buf = io.StringIO()
         np.savetxt(buf, np.column_stack([xyz, inten]), delimiter=",",
                    header="x,y,z,intensity", comments="", fmt="%.2f")
         base = os.path.splitext(os.path.basename(S["path"]))[0]
         name = f"{base}_frame{fr}.csv" if S["is_dat"] else f"{base}.csv"
         return {"content": buf.getvalue(), "filename": name}
+
+    @app.callback(Output("dl", "data", allow_duplicate=True),
+                  Output("recmsg", "children"),
+                  Input("recbtn", "n_clicks"),
+                  State("fr", "value"), State("maxd", "value"),
+                  State("colorby", "value"), State("rangeon", "value"),
+                  State("rx", "value"), State("ry", "value"),
+                  State("rz", "value"), prevent_initial_call=True)
+    def _record(nclk, fr, maxd, colorby, rangeon, rx, ry, rz):
+        fr = int(fr) if fr is not None else 0
+        if S["is_dat"]:
+            fr = min(max(0, fr), max(0, S["n"] - 1))
+        md = None if (maxd is None or maxd >= 4000) else float(maxd)
+        pc = load(S["path"], fr, S["is_dat"], md, 40000)
+        if pc is None or len(pc.xyz) == 0:
+            return dash.no_update, "表示する点がありません。"
+        xyz, inten = _clip(pc)
+        xyz, inten = _apply_box(xyz, inten, _box(rangeon, rx, ry, rz))
+        try:
+            b64 = _make_gif(xyz, inten, colorby or "z")
+        except Exception as e:
+            return dash.no_update, f"録画に失敗しました: {e}"
+        base = os.path.splitext(os.path.basename(S["path"]))[0]
+        return ({"content": b64, "filename": f"{base}_frame{fr}.gif",
+                 "base64": True}, "保存しました(回転GIF)。")
 
     @app.callback(
         Output("fr", "max"), Output("fr", "value"), Output("fr", "step"),
