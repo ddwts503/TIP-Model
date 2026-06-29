@@ -1,0 +1,258 @@
+"""ベッド(寝台)などの広い平面を自動検出し、それを基準(XY面)に整列する.
+
+ベッド平面を Z=0 とし、ベッドからの高さ(手前=カメラ側)を +Z にする座標へ変換。
+顔の3点クリックなしで、安定した基準面が得られる。
+"""
+from __future__ import annotations
+
+import os
+from typing import Optional
+
+import numpy as np
+
+from .loader import PointCloud
+from .reference import _saved_and_open
+
+
+def fit_bed_plane(xyz: np.ndarray, *, dist: float = 6.0, iters: int = 2000):
+    """点群から支配的な平面(ベッド)を RANSAC で検出。
+
+    Open3D があれば使用、無ければ簡易 RANSAC。戻り値: (n(3,), d, inlier_mask)
+    平面: n·P + d = 0、|n|=1。
+    """
+def fit_bed_plane(xyz, *, dist: float = 6.0, iters: int = 2000):
+    """点群から支配的な平面(ベッド)を RANSAC で検出(numpyのみ・Open3D不使用)。
+
+    戻り値: (n(3,), d, inlier_mask)。平面: n·P + d = 0、|n|=1。
+    """
+    rng = np.random.default_rng(0)
+    N = len(xyz)
+    # 速度のため評価はサブサンプルで
+    eval_idx = (rng.choice(N, 8000, replace=False) if N > 8000
+                else np.arange(N))
+    sub = xyz[eval_idx]
+    best = None
+    best_cnt = -1
+    for _ in range(iters):
+        idx = rng.choice(N, 3, replace=False)
+        p = xyz[idx]
+        n = np.cross(p[1] - p[0], p[2] - p[0])
+        nn = np.linalg.norm(n)
+        if nn < 1e-9:
+            continue
+        n = n / nn
+        d = -n @ p[0]
+        cnt = int((np.abs(sub @ n + d) < dist).sum())
+        if cnt > best_cnt:
+            best_cnt, best = cnt, (n, d)
+    n, d = best
+    mask = np.abs(xyz @ n + d) < dist
+    # インライアで最小二乗リフィット
+    P = xyz[mask]
+    c = P.mean(0)
+    _, _, vt = np.linalg.svd(P - c, full_matrices=False)
+    n = vt[2]
+    d = -n @ c
+    mask = np.abs(xyz @ n + d) < dist
+    return n, d, mask
+
+
+def _clean(xyz, inten, *, zlo_pct=1.0, zhi_pct=99.0):
+    """遠近の外れ値ノイズを除去(Zパーセンタイル + scipyで統計的外れ値除去)。"""
+    z = xyz[:, 2]
+    lo, hi = np.percentile(z, [zlo_pct, zhi_pct])
+    m = (z >= lo) & (z <= hi)
+    xyz, inten = xyz[m], inten[m]
+    # 統計的外れ値除去(近傍距離が大きい点を除く)。scipyが無ければスキップ
+    try:
+        from scipy.spatial import cKDTree
+        if len(xyz) > 50:
+            sub = xyz
+            if len(xyz) > 60000:        # 速度のため間引いて基準を作る
+                ridx = np.random.default_rng(0).choice(len(xyz), 60000,
+                                                       replace=False)
+                sub = xyz[ridx]
+            tree = cKDTree(sub)
+            k = min(9, len(sub))
+            dists, _ = tree.query(xyz, k=k, workers=-1)
+            md = dists[:, 1:].mean(axis=1)
+            thr = md.mean() + 2.0 * md.std()
+            keep = md <= thr
+            xyz, inten = xyz[keep], inten[keep]
+    except Exception:
+        pass
+    return xyz, inten
+
+
+def _find_sagittal_normal(pts, res=5.0):
+    """体の footprint の左右対称面(矢状面)の法線方向を、鏡映の重なりで探す。
+
+    pts: 中心化済み (M,2)。戻り値: 矢状面の法線(=左右/内外側方向)単位ベクトル。
+    """
+    rng = np.random.default_rng(0)
+    if len(pts) > 6000:
+        pts = pts[rng.choice(len(pts), 6000, replace=False)]
+
+    def occ(P):
+        return set(map(tuple, np.floor(P / res).astype(int)))
+
+    base = occ(pts)
+    best_n = np.array([1.0, 0.0])
+    best_score = -1
+    for deg in range(0, 180, 2):
+        th = np.radians(deg)
+        nrm = np.array([np.cos(th), np.sin(th)])
+        d = pts @ nrm
+        refl = pts - 2.0 * np.outer(d, nrm)   # 矢状面(法線nrm,原点通過)で鏡映
+        score = len(base & occ(refl))         # 元と鏡映の重なり=対称性
+        if score > best_score:
+            best_score, best_n = score, nrm
+    return best_n
+
+
+def _center_body(xp, yp, zp):
+    """体の左右対称面(矢状面)を見つけ、x'=0=体の中心線・頭足方向を y' に揃える。
+
+    戻り値: (新xp, 新yp, info)。
+    """
+    zmax = float(np.nanmax(zp))
+    subj = zp > 0.3 * zmax            # ベッドより十分高い=体
+    if int(subj.sum()) < 100:
+        return xp, yp, None
+    cx = float(xp[subj].mean())
+    cy = float(yp[subj].mean())
+    P = np.column_stack([xp[subj] - cx, yp[subj] - cy])
+    nrm = _find_sagittal_normal(P)   # 矢状面の法線=左右(内外側)方向
+    tang = np.array([-nrm[1], nrm[0]])  # 矢状面内の方向=頭足方向
+    rel = np.column_stack([xp - cx, yp - cy])
+    with np.errstate(all="ignore"):
+        xnew = rel @ nrm                 # 左右 → x'(矢状面の法線。x'=0が体の中心線)
+        ynew = rel @ tang                # 頭足 → y'
+    # 頭(高い側)が +y' になるよう向きを統一
+    top = zp > np.percentile(zp[subj], 90)
+    if top.sum() > 10 and ynew[top].mean() < 0:
+        ynew = -ynew
+    deg = float(np.degrees(np.arctan2(tang[1], tang[0])))
+    return xnew, ynew, {"deg": deg, "cx": cx, "cy": cy}
+
+
+def apply_manual(xp, yp, yaw=0.0, dx=0.0, dy=0.0):
+    """手動微調整: yaw[度]回転 → dx,dy[mm]移動 を (xp,yp) に適用。"""
+    if yaw:
+        th = np.radians(yaw)
+        c, s = np.cos(th), np.sin(th)
+        xp, yp = c * xp - s * yp, s * xp + c * yp
+    if dx or dy:
+        xp = xp - dx
+        yp = yp - dy
+    return xp, yp
+
+
+def compute_bed_aligned(pc: PointCloud, *, dist: float = 6.0,
+                        center: bool = True):
+    """ベッド検出→XY面整列→(任意で)体中心へ矢状面整列。
+
+    戻り値: (xp, yp, zp, inten, meta)。manual 調整は含まない。
+    """
+    inten0 = pc.intensity if pc.intensity is not None else np.zeros(len(pc.xyz))
+    xyz, inten = _clean(pc.xyz, inten0)
+
+    n, d, mask = fit_bed_plane(xyz, dist=dist)
+    if n[2] > 0:
+        n, d = -n, -d
+    height = xyz @ n + d
+
+    zax = n
+    xax = np.array([1.0, 0.0, 0.0]) - (np.array([1.0, 0, 0]) @ zax) * zax
+    if np.linalg.norm(xax) < 1e-6:
+        xax = np.array([0.0, 1.0, 0.0]) - (np.array([0, 1.0, 0]) @ zax) * zax
+    xax = xax / np.linalg.norm(xax)
+    yax = np.cross(zax, xax)
+
+    origin = xyz.mean(0)
+    origin = origin - (origin @ n + d) * n
+    with np.errstate(all="ignore"):
+        rel = xyz - origin
+        xp = rel @ xax
+        yp = rel @ yax
+    zp = height
+
+    info = None
+    if center:
+        xp, yp, info = _center_body(xp, yp, zp)
+    meta = {"normal": n, "inliers": int(mask.sum()), "center_info": info,
+            "n_in": len(pc.xyz), "n_clean": len(xyz)}
+    return xp, yp, zp, inten, meta
+
+
+def align_to_bed(
+    pc: PointCloud,
+    *,
+    dist: float = 6.0,
+    center: bool = True,
+    yaw: float = 0.0,
+    dx: float = 0.0,
+    dy: float = 0.0,
+    save_csv: Optional[str] = None,
+    save: Optional[str] = None,
+):
+    """ベッド平面を検出し、それを XY 面(Z=高さ)に整列した点群を保存・表示。
+
+    center=True で体の対称軸に矢状面(x'=0)を自動整列。さらに yaw[度]/dx/dy[mm]
+    で手動微調整できる。対話調整は --mode adjust(ブラウザ)を参照。
+    """
+    import matplotlib.pyplot as plt
+
+    xp, yp, zp, inten, meta = compute_bed_aligned(pc, dist=dist, center=center)
+    print(f"[bed] ノイズ除去: {meta['n_in']:,} → {meta['n_clean']:,} 点")
+    if meta["center_info"]:
+        ci = meta["center_info"]
+        print(f"[bed] 自動で体の中心に矢状面(x'=0)を整列。回転 {ci['deg']:.1f}°、"
+              f"中心移動 ({ci['cx']:.0f},{ci['cy']:.0f})mm")
+    xp, yp = apply_manual(xp, yp, yaw, dx, dy)
+    if yaw or dx or dy:
+        print(f"[bed] 手動調整: 回転 {yaw:+.1f}°, 移動 dx={dx:+.0f} dy={dy:+.0f} mm")
+    mask_n = meta["inliers"]
+    n = meta["normal"]
+    aligned = np.column_stack([xp, yp, zp])
+
+    if save_csv is None:
+        save_csv = os.path.expanduser("~/Desktop/aligned_bed.csv")
+    np.savetxt(save_csv, np.column_stack([aligned, inten]), delimiter=",",
+               header="x,y,z,intensity", comments="", fmt="%.3f")
+    print(f"[bed] ベッド平面を検出(インライア {mask_n:,} 点)。"
+          f"法線={n.round(3)}")
+    print(f"[bed] 高さの範囲 z' = [{zp.min():.0f}, {zp.max():.0f}] mm")
+    print(f"[bed] ベッド=XY面(Z=高さ)に整列した点群を保存: {save_csv}")
+    print(f"  Z'=ベッドからの高さmm(手前+)。輪切り --axis z はベッドに平行な層、"
+          f"--axis x/y は垂直断面。")
+
+    # 表示範囲はパーセンタイルで読みやすく
+    def _lim(v, pad=0.05):
+        lo, hi = np.percentile(v, [1, 99])
+        m = (hi - lo) * pad + 1
+        return lo - m, hi + m
+
+    # プレビュー: 正面(x'-y' 色=高さ)と側面(x'-z')
+    fig, (axF, axS) = plt.subplots(1, 2, figsize=(13, 6))
+    axF.scatter(xp, yp, c=np.clip(zp, *np.percentile(zp, [1, 99])),
+                cmap="turbo", s=2)
+    axF.axvline(0, color="red", lw=1.2)        # 矢状面(体の中心)
+    axF.set_aspect("equal", adjustable="box")
+    axF.set_xlim(*_lim(xp)); axF.set_ylim(*_lim(yp))
+    axF.set_xlabel("x' left-right [mm]  (red = sagittal midline)")
+    axF.set_ylabel("y' head-foot [mm]")
+    axF.set_title("TOP view (looking down on bed)\ncolor = height above bed")
+    axS.scatter(xp, zp, c=zp, cmap="turbo", s=2)
+    axS.axhline(0, color="red", lw=1.2)        # ベッド面
+    axS.set_xlim(*_lim(xp)); axS.set_ylim(*_lim(zp))
+    axS.set_xlabel("x' [mm]"); axS.set_ylabel("z' height above bed [mm]")
+    axS.set_title("SIDE view\nred line = bed (z'=0)")
+    fig.suptitle("Aligned to BED plane (XY = bed, Z = height)", fontsize=13)
+    fig.tight_layout()
+    if save:
+        fig.savefig(save, dpi=150)
+        _saved_and_open(save)
+    else:
+        plt.show()
+    return save_csv
