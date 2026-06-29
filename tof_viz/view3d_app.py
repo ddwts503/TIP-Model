@@ -45,7 +45,20 @@ def run_view3d(path, *, frame=None, port=8060):
             return None
         return pc
 
-    def fig3d(pc, ptsize):
+    def _clip(pc):
+        """外れ値(遠くにポツンとある点)を除いた xyz, intensity を返す。"""
+        xyz = pc.xyz
+        inten = pc.intensity if pc.intensity is not None else xyz[:, 2]
+        if len(xyz) > 50:
+            m = np.ones(len(xyz), bool)
+            for j in range(3):
+                lo, hi = np.percentile(xyz[:, j], [0.5, 99.5])
+                m &= (xyz[:, j] >= lo) & (xyz[:, j] <= hi)
+            if int(m.sum()) > 50:
+                xyz, inten = xyz[m], inten[m]
+        return xyz, inten
+
+    def fig3d(pc, ptsize, colorby="z"):
         fig = go.Figure()
         if pc is None or len(pc.xyz) == 0:
             fig.add_annotation(text="このコマには表示できる点がありません。<br>"
@@ -54,18 +67,14 @@ def run_view3d(path, *, frame=None, port=8060):
                                xref="paper", yref="paper", x=0.5, y=0.5)
             fig.update_layout(height=480)
             return fig
-        xyz = pc.xyz
-        # 外れ値(遠くにポツンとある点)を除いて、人にぴったり合わせる
-        if len(xyz) > 50:
-            m = np.ones(len(xyz), bool)
-            for j in range(3):
-                lo, hi = np.percentile(xyz[:, j], [0.5, 99.5])
-                m &= (xyz[:, j] >= lo) & (xyz[:, j] <= hi)
-            if int(m.sum()) > 50:
-                xyz = xyz[m]
+        xyz, inten = _clip(pc)
+        if colorby == "ir":          # 明るさ(IR)=実写ふう
+            col, cs = inten, "Gray"
+        else:                         # 距離(高さ)=色分け
+            col, cs = xyz[:, 2], "Turbo"
         fig.add_trace(go.Scatter3d(
             x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2], mode="markers",
-            marker=dict(size=ptsize, color=xyz[:, 2], colorscale="Turbo",
+            marker=dict(size=ptsize, color=col, colorscale=cs,
                         opacity=0.85)))
         # データの範囲に合わせて自動ズーム(外れ値で小さくならないように)
         rng = {}
@@ -91,7 +100,7 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v11]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v12]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -134,6 +143,19 @@ def run_view3d(path, *, frame=None, port=8060):
         html.Label("点の大きさ"),
         dcc.Slider(1, 5, 1, value=2, id="psz",
                    tooltip={"placement": "bottom", "always_visible": True}),
+        html.Div([
+            html.Span("色: ", style={"marginRight": "6px"}),
+            dcc.RadioItems(id="colorby", value="z", inline=True,
+                           options=[{"label": " 距離(色分け)", "value": "z"},
+                                    {"label": " 明るさ(実写ふう)",
+                                     "value": "ir"}],
+                           style={"display": "inline-block",
+                                  "marginRight": "16px"}),
+            html.Button("↺ 視点リセット", id="resetbtn", n_clicks=0,
+                        style={"marginRight": "8px"}),
+            html.Button("⬇ CSV書き出し", id="csvbtn", n_clicks=0),
+            dcc.Download(id="dl"),
+        ], style={"margin": "8px 0"}),
         dcc.Graph(id="g3d", config={"scrollZoom": False}),
         html.P("マウスでドラッグ=回転。拡大縮小はトラックパッドのピンチ、または"
                "右上の拡大ボタン。ページは普通にスクロールできます。"
@@ -142,14 +164,35 @@ def run_view3d(path, *, frame=None, port=8060):
 
     @app.callback(Output("g3d", "figure"),
                   Input("fr", "value"), Input("maxd", "value"),
-                  Input("psz", "value"))
-    def _update(fr, maxd, psz):
+                  Input("psz", "value"), Input("colorby", "value"),
+                  Input("resetbtn", "n_clicks"))
+    def _update(fr, maxd, psz, colorby, reset):
         fr = int(fr) if fr is not None else 0
         if S["is_dat"]:
             fr = min(max(0, fr), max(0, S["n"] - 1))
         md = None if (maxd is None or maxd >= 4000) else float(maxd)
         pc = load(S["path"], fr, S["is_dat"], md, 40000)
-        return fig3d(pc, int(psz))
+        return fig3d(pc, int(psz), colorby or "z")
+
+    @app.callback(Output("dl", "data"), Input("csvbtn", "n_clicks"),
+                  State("fr", "value"), State("maxd", "value"),
+                  prevent_initial_call=True)
+    def _csv(nclk, fr, maxd):
+        import io
+        fr = int(fr) if fr is not None else 0
+        if S["is_dat"]:
+            fr = min(max(0, fr), max(0, S["n"] - 1))
+        md = None if (maxd is None or maxd >= 4000) else float(maxd)
+        pc = load(S["path"], fr, S["is_dat"], md, 200000)
+        if pc is None or len(pc.xyz) == 0:
+            raise dash.exceptions.PreventUpdate
+        xyz, inten = _clip(pc)
+        buf = io.StringIO()
+        np.savetxt(buf, np.column_stack([xyz, inten]), delimiter=",",
+                   header="x,y,z,intensity", comments="", fmt="%.2f")
+        base = os.path.splitext(os.path.basename(S["path"]))[0]
+        name = f"{base}_frame{fr}.csv" if S["is_dat"] else f"{base}.csv"
+        return {"content": buf.getvalue(), "filename": name}
 
     @app.callback(
         Output("fr", "max"), Output("fr", "value"), Output("fr", "step"),
