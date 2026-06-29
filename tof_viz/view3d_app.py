@@ -52,7 +52,7 @@ def run_view3d(path, *, frame=None, port=8060):
                                "コマや「遠くの背景を消す」を調整してください。",
                                showarrow=False, font=dict(size=16, color="red"),
                                xref="paper", yref="paper", x=0.5, y=0.5)
-            fig.update_layout(height=700)
+            fig.update_layout(height=480)
             return fig
         xyz = pc.xyz
         # 外れ値(遠くにポツンとある点)を除いて、人にぴったり合わせる
@@ -74,7 +74,7 @@ def run_view3d(path, *, frame=None, port=8060):
             pad = (hi - lo) * 0.05 + 1
             rng[key] = dict(range=[lo - pad, hi + pad])
         fig.update_layout(
-            height=720, margin=dict(l=0, r=0, t=0, b=0),
+            height=480, margin=dict(l=0, r=0, t=0, b=0),
             scene=dict(aspectmode="data",
                        xaxis=dict(title="X [mm]", **rng["xaxis"]),
                        yaxis=dict(title="Y [mm]", **rng["yaxis"]),
@@ -91,7 +91,7 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v10]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v11]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -134,9 +134,10 @@ def run_view3d(path, *, frame=None, port=8060):
         html.Label("点の大きさ"),
         dcc.Slider(1, 5, 1, value=2, id="psz",
                    tooltip={"placement": "bottom", "always_visible": True}),
-        dcc.Graph(id="g3d"),
-        html.P("マウスでドラッグ=回転、ホイール=拡大縮小。終了はこのウインドウで"
-               "Control+C。", style={"color": "#555"}),
+        dcc.Graph(id="g3d", config={"scrollZoom": False}),
+        html.P("マウスでドラッグ=回転。拡大縮小はトラックパッドのピンチ、または"
+               "右上の拡大ボタン。ページは普通にスクロールできます。"
+               "終了はこのウインドウでControl+C。", style={"color": "#555"}),
     ], style={"fontFamily": "sans-serif", "margin": "20px"})
 
     @app.callback(Output("g3d", "figure"),
