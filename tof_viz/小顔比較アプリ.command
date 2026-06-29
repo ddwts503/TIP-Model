@@ -22,10 +22,19 @@ pkill -f "tof_viz" 2>/dev/null
 sleep 1
 
 echo "[3/4] SSDの計測データ(.dat)を探しています..."
-DAT=$(find /Volumes -maxdepth 6 -name "*.dat" -size +50M 2>/dev/null \
-      | xargs -I{} stat -f "%m %N" {} 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+# アプリ本体と同じ強力な検索(大文字小文字を無視・全SSD・深さ無制限)
+DAT=$(python3 -c "from tof_viz.compare_app import find_data_files; fs=find_data_files(deep=True); print(fs[0] if fs else '')" 2>/dev/null)
 if [ -z "$DAT" ]; then
-  echo "計測データ(.dat)が見つかりませんでした。SSDの接続を確認してください。"
+  echo "  (予備の検索を実行)"
+  DAT=$(find /Volumes -maxdepth 8 -iname "*.dat" -size +20M 2>/dev/null | head -1)
+fi
+if [ -z "$DAT" ]; then
+  echo "計測データ(.dat)が見つかりませんでした。"
+  echo "SSDは認識されていますが、その中に .dat が見当たりません。"
+  echo "  接続中のSSD(/Volumes):"
+  ls -1 /Volumes 2>/dev/null | sed 's/^/    /'
+  echo "  上のSSDの中に .dat ファイルがあるか確認してください。"
+  echo "  (このログ「小顔アプリ_ログ.txt」を送ってもらえれば調べます)"
   read -p "Enterで閉じる"
   exit 1
 fi
