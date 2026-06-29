@@ -55,15 +55,30 @@ def run_view3d(path, *, frame=None, port=8060):
             fig.update_layout(height=700)
             return fig
         xyz = pc.xyz
+        # 外れ値(遠くにポツンとある点)を除いて、人にぴったり合わせる
+        if len(xyz) > 50:
+            m = np.ones(len(xyz), bool)
+            for j in range(3):
+                lo, hi = np.percentile(xyz[:, j], [0.5, 99.5])
+                m &= (xyz[:, j] >= lo) & (xyz[:, j] <= hi)
+            if int(m.sum()) > 50:
+                xyz = xyz[m]
         fig.add_trace(go.Scatter3d(
             x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2], mode="markers",
             marker=dict(size=ptsize, color=xyz[:, 2], colorscale="Turbo",
                         opacity=0.85)))
+        # データの範囲に合わせて自動ズーム(外れ値で小さくならないように)
+        rng = {}
+        for j, key in ((0, "xaxis"), (1, "yaxis"), (2, "zaxis")):
+            lo, hi = float(xyz[:, j].min()), float(xyz[:, j].max())
+            pad = (hi - lo) * 0.05 + 1
+            rng[key] = dict(range=[lo - pad, hi + pad])
         fig.update_layout(
             height=720, margin=dict(l=0, r=0, t=0, b=0),
             scene=dict(aspectmode="data",
-                       xaxis_title="X [mm]", yaxis_title="Y [mm]",
-                       zaxis_title="距離 Z [mm]"))
+                       xaxis=dict(title="X [mm]", **rng["xaxis"]),
+                       yaxis=dict(title="Y [mm]", **rng["yaxis"]),
+                       zaxis=dict(title="距離 Z [mm]", **rng["zaxis"])))
         return fig
 
     fr0 = frame if frame is not None else (n // 2 if is_dat else 0)
@@ -76,7 +91,7 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v9]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v10]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -113,7 +128,7 @@ def run_view3d(path, *, frame=None, port=8060):
                    id="fr", tooltip={"placement": "bottom",
                                      "always_visible": True}),
         html.Label("遠くの背景を消す(最大距離 mm。小さくすると壁などが消える)"),
-        dcc.Slider(700, 4000, 50, value=4000, id="maxd",
+        dcc.Slider(700, 4000, 50, value=1500, id="maxd",
                    marks={700: "700", 1500: "1500", 2500: "2500", 4000: "全部"},
                    tooltip={"placement": "bottom", "always_visible": True}),
         html.Label("点の大きさ"),
