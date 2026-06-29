@@ -31,10 +31,25 @@ if [ -z "$DAT" ]; then
 fi
 echo "  最初に使うデータ: $DAT"
 
-echo "[4/4] ブラウザで比較アプリを開きます。下に出る http://… が画面の住所です。"
-echo "      (自動で開かない時は、その住所をChromeのアドレス欄に入れてください)"
+echo "[4/4] ブラウザで比較アプリを開きます。少しお待ちください…"
 echo "      終了するときは、このウインドウで Control+C"
 echo "---------------------------------------------"
+# アプリが実際の住所を書き出したら、その住所でブラウザを自動で開く
+URLFILE="$HOME/.tofviz_url.txt"
+rm -f "$URLFILE"
+export TOFVIZ_NO_AUTOOPEN=1
+(
+  for i in $(seq 1 120); do
+    if [ -s "$URLFILE" ]; then
+      sleep 2
+      U=$(cat "$URLFILE")
+      echo ">>> ブラウザを開きます: $U"
+      open "$U"
+      break
+    fi
+    sleep 1
+  done
+) &
 python3 -m tof_viz --mode compare --after same "$DAT"
 echo "---------------------------------------------"
 echo "アプリが終了しました。問題があれば、デスクトップの「小顔アプリ_ログ.txt」を送ってください。"

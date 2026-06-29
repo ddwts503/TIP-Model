@@ -38,6 +38,15 @@ def open_browser(url):
         pass
 
 
+def _write_url_file(url):
+    """起動した実際の住所をファイルに記録(ランチャーがこれを読んで開く)。"""
+    try:
+        with open(os.path.expanduser("~/.tofviz_url.txt"), "w") as f:
+            f.write(url)
+    except Exception:
+        pass
+
+
 def _walk_collect(root, *, maxdepth=None, min_size=1_000_000):
     """root配下の .dat/.csv を集める(大文字小文字を区別しない・エラーに強い)。"""
     out = []
@@ -529,7 +538,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v32]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v33]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -859,7 +868,9 @@ def run_compare(before_path, after_path, *, frame_before=None,
         print("  ↑この住所をiPhoneのSafariのアドレス欄に入れてください。")
     print("  顔をクリックして範囲を合わせてください。終了: Control+C")
     print(f"  ★ブラウザが開かないときは、Chromeのアドレス欄に {url} を入れてください")
-    open_browser(url)
+    _write_url_file(url)
+    if not os.environ.get("TOFVIZ_NO_AUTOOPEN"):
+        open_browser(url)
     try:
         app.run(host="0.0.0.0", port=port, debug=False)
     except AttributeError:

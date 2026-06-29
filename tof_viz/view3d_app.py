@@ -14,7 +14,8 @@ from functools import lru_cache
 import numpy as np
 
 from .compare_app import (
-    data_label, find_data_files, list_volumes, open_browser, scan_folder)
+    data_label, find_data_files, list_volumes, open_browser, scan_folder,
+    _write_url_file)
 from .loader import load_points
 
 _open_browser = open_browser
@@ -75,7 +76,7 @@ def run_view3d(path, *, frame=None, port=8060):
     dat_opts = _opts(find_data_files(extra=[path]))
 
     app.layout = html.Div([
-        html.H2("3D ビューア(ToFデータ)  [版 v8]"),
+        html.H2("3D ビューア(ToFデータ)  [版 v9]"),
         html.Div([
             html.B("データの選択(どのSSDからでも)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -210,7 +211,9 @@ def run_view3d(path, *, frame=None, port=8060):
         print(f"[view3d] iPhone/iPadで開く(同じWi-Fi): http://{lan_ip}:{port}")
     print("  ドラッグで回転、ホイールで拡大。終了: Control+C")
     print(f"  ★ブラウザが開かないときは、Chromeのアドレス欄に {url} を入れてください")
-    _open_browser(url)
+    _write_url_file(url)
+    if not os.environ.get("TOFVIZ_NO_AUTOOPEN"):
+        _open_browser(url)
     try:
         app.run(host="0.0.0.0", port=port, debug=False)
     except AttributeError:
