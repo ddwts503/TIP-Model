@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import glob
 import os
+import subprocess
+import sys
 import webbrowser
 from functools import lru_cache
 from typing import Optional
@@ -20,6 +22,20 @@ from .measure import measure_section
 
 
 DATA_EXTS = (".dat", ".csv")
+
+
+def open_browser(url):
+    """ブラウザを開く。macOSは確実な `open` を最優先で使う。"""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", url])
+            return
+    except Exception:
+        pass
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
 
 
 def _walk_collect(root, *, maxdepth=None, min_size=1_000_000):
@@ -513,7 +529,7 @@ def run_compare(before_path, after_path, *, frame_before=None,
     dat_opts = _opts(find_data_files(extra=[before_path, after_path]))
 
     app.layout = html.Div([
-        html.H2("ビフォー・アフター 小顔チェック  [版 v31]"),
+        html.H2("ビフォー・アフター 小顔チェック  [版 v32]"),
         html.Div([
             html.B("データの選択(別のファイルに変えられます)"),
             html.Label("① SSD(ドライブ)を選ぶ"),
@@ -842,10 +858,8 @@ def run_compare(before_path, after_path, *, frame_before=None,
               f"http://{lan_ip}:{port}")
         print("  ↑この住所をiPhoneのSafariのアドレス欄に入れてください。")
     print("  顔をクリックして範囲を合わせてください。終了: Control+C")
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    print(f"  ★ブラウザが開かないときは、Chromeのアドレス欄に {url} を入れてください")
+    open_browser(url)
     try:
         app.run(host="0.0.0.0", port=port, debug=False)
     except AttributeError:
